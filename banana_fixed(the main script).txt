@@ -1,15 +1,4 @@
 -- ez banana cat hub 
-if not LPH_ATTRIBUTES then
-	getgenv().LPH_ATTRIBUTES = function(...) return ... end
-	getgenv().LPH_NO_VIRTUALIZE = function(...) return ... end
-	getgenv().LPH_JIT = function(...) return ... end
-	getgenv().LPH_JIT_MAX = function(...) return ... end
-	getgenv().LPH_NO_UPVALUES = function(...) return ... end
-	getgenv().LPH_ENCSTR = function(...) return ... end
-	getgenv().LPH_HOOK_FIX = function(...) return ... end
-	getgenv().VM = function(...) return ... end
-	getgenv().NONE = nil
-end
 
 function GetPlayerLevel()
 	local p = game:GetService("Players").LocalPlayer
@@ -410,8 +399,11 @@ SectionShopMisc.CreateButton({ Title = "Reset Stats" }, function()
 	game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BlackbeardReward", "Refund", "2")
 end)
 
-SectionShopMisc.CreateButton({ Title = "Buy Race Cyborg" }, function()
-	game.ReplicatedStorage.Remotes.CommF_:InvokeServer("CyborgTrainer", "Buy")
+SectionShopMisc.CreateButton({ Title = "Buy Race Cyborg [ $2,500,000 + 2,500 Frags ]" }, function()
+	task.spawn(function()
+		game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CyborgTrainer", "Buy")
+		game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("CyborgTrainer", " Buy")
+	end)
 end)
 
 SectionShopMisc.CreateButton({ Title = "Buy Race Ghoul" }, function()
@@ -420,241 +412,461 @@ SectionShopMisc.CreateButton({ Title = "Buy Race Ghoul" }, function()
 end)
 
 SectionShopFighting = PageShop.CreateSection("Fighting Shop")
-local g = {}
+local g = getgenv().notsave or {}
 getgenv().notsave = g
-local G = {
-	BuyBlackLeg = "Dark Step Teacher",
-	BuySuperhuman = "Martial Arts Master",
-	BuySharkmanKarate = "Sharkman Teacher",
-	DragonClaw = "Sabi",
-	BuyDragonTalon = "Uzoth",
-	BuyElectro = "Mad Scientist",
-	BuyFishmanKarate = "Water Kung-fu Teacher",
-	BuyDeathStep = "Phoeyu, the Reformed",
-	BuyGodhuman = "Ancient Monk",
-	BuyElectricClaw = "Previous Hero",
-	BuySanguineArt = "Shafi",
+
+local TeacherCFs = {
+	["Black Leg"] = {
+		[1] = CFrame.new(-1246, 7, 3915),
+		[2] = CFrame.new(-5946, 8, -4299),
+		[3] = CFrame.new(-5048, 314, -3159),
+	},
+	["Electro"] = {
+		[1] = CFrame.new(-4607, 873, -1667),
+		[2] = CFrame.new(-5946, 8, -4299),
+		[3] = CFrame.new(-5048, 314, -3159),
+	},
+	["Fishman Karate"] = {
+		[1] = CFrame.new(61122, 18, 1569),
+		[2] = CFrame.new(-5946, 8, -4299),
+		[3] = CFrame.new(-5048, 314, -3159),
+	},
+	["Dragon Breath"] = {
+		[2] = CFrame.new(-1440, 24, 1140),
+	},
+	["Superhuman"] = {
+		[2] = CFrame.new(1198, 483, -4544),
+		[3] = CFrame.new(-5048, 314, -3159),
+	},
+	["Death Step"] = {
+		[2] = CFrame.new(6371, 297, -6841),
+		[3] = CFrame.new(-5048, 314, -3159),
+	},
+	["Sharkman Karate"] = {
+		[2] = CFrame.new(-2605, 239, -10315),
+		[3] = CFrame.new(-5048, 314, -3159),
+	},
+	["Electric Claw"] = {
+		[3] = CFrame.new(-10371, 331, -10132),
+	},
+	["Dragon Talon"] = {
+		[3] = CFrame.new(-9515, 399, 5748),
+	},
+	["Godhuman"] = {
+		[3] = CFrame.new(-11030, 332, -9615),
+	},
+	["Sanguine Art"] = {
+		[3] = CFrame.new(-16450, 9, 430),
+	},
 }
-pcall(function() NPCManager = require(game:GetService("ReplicatedStorage"):WaitForChild("NPCManager", 5)) end)
-function DetectNpc(f)
-	local K = t.Character and (t.Character:FindFirstChild("HumanoidRootPart"))
-	if not K then
-		return
-	end
-	local R, m, E, l = next, { workspace.NPCs, game:GetService("ReplicatedStorage").NPCs }, 1 / 0
-	for Q, Q in R, m, nil do
-		local R, m, S = next, Q:GetChildren()
-		for Q, L in R, m, S do
-			if
-				L:GetAttribute("NPCLoaded")
-				and (L:GetAttribute("NPCReady"))
-				and L.Name == f
-				and (L:FindFirstChild("HumanoidRootPart"))
-			then
-				local dist = (K.Position - L.HumanoidRootPart.Position).Magnitude
-				if dist < E then
-					E, l = dist, L
-				end
+
+local function BuyOrEquipFightingStyle(displayName, toolNames, remoteCallFn, fallbackCFTable)
+	local commF = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 5) and game:GetService("ReplicatedStorage").Remotes:WaitForChild("CommF_", 5)
+	if not commF then return false end
+
+	local function CheckOwned()
+		local lp = game.Players.LocalPlayer or t
+		local char = lp and lp.Character
+		local bp = lp and lp.Backpack
+		for _, name in ipairs(toolNames) do
+			if (char and char:FindFirstChild(name)) or (bp and bp:FindFirstChild(name)) then
+				return true, name
 			end
 		end
+		return false
 	end
-	if not l then
-		return NPCManager.getNPCsByName(f)[1]._modelState._instance
+
+	-- 1. Direct Remote Call: Instantly equips if unlocked or purchases if eligible
+	local res = nil
+	pcall(function()
+		res = remoteCallFn(commF)
+	end)
+
+	task.wait(0.2)
+	local isOwned, equippedName = CheckOwned()
+	if isOwned then
+		pcall(function()
+			A.CreateNoti({ Title = "Fighting Shop", Desc = "Equipped " .. (equippedName or displayName) .. "!", ShowTime = 4 })
+		end)
+		return true
 	end
-	return l, E
+
+	-- If the game returned a rejection message (e.g. need key, money, frags)
+	if type(res) == "string" and (string.find(res, "keys") or string.find(res, "money") or string.find(res, "Fragments") or string.find(res, "Beli") or string.find(res, "mastery")) then
+		pcall(function()
+			A.CreateNoti({ Title = "Fighting Shop", Desc = displayName .. ": " .. tostring(res), ShowTime = 5 })
+		end)
+		return false
+	end
+
+	-- 2. If not equipped yet, check if there is a teacher location in this Sea
+	local seaNum = (game.PlaceId == 2753915549 or game.PlaceId == 85211729168715) and 1
+		or (game.PlaceId == 4442272183 or game.PlaceId == 79091703265657) and 2
+		or (game.PlaceId == 7449423635 or game.PlaceId == 100117331123089) and 3
+		or 1
+
+	local targetCF = fallbackCFTable and fallbackCFTable[seaNum]
+	if not targetCF then
+		pcall(function()
+			local msg = (type(res) == "string" and res) or (displayName .. " Teacher is not available in Sea " .. tostring(seaNum))
+			A.CreateNoti({ Title = "Fighting Shop", Desc = msg, ShowTime = 5 })
+		end)
+		return false
+	end
+
+	-- Travel to teacher
+	pcall(function()
+		A.CreateNoti({ Title = "Fighting Shop", Desc = "Traveling to " .. displayName .. " Teacher...", ShowTime = 4 })
+	end)
+
+	local startT = tick()
+	repeat
+		task.wait(0.25)
+		local tweenFn = toTarget or getgenv().toTarget or getgenv().BackupTween
+		if typeof(tweenFn) == "function" then
+			tweenFn(targetCF * CFrame.new(0, 3, 3))
+		end
+		local lp = game.Players.LocalPlayer or t
+		local hrp = lp and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and (hrp.Position - targetCF.Position).Magnitude < 18 then
+			break
+		end
+	until tick() - startT > 25
+
+	-- Re-invoke remote at teacher
+	task.wait(0.3)
+	pcall(function()
+		res = remoteCallFn(commF)
+	end)
+
+	task.wait(0.2)
+	local isOwnedAfter, equippedNameAfter = CheckOwned()
+	if isOwnedAfter then
+		pcall(function()
+			A.CreateNoti({ Title = "Fighting Shop", Desc = "Successfully acquired " .. (equippedNameAfter or displayName) .. "!", ShowTime = 5 })
+		end)
+		return true
+	else
+		pcall(function()
+			local msg = (type(res) == "string" and res) or ("Check prerequisites / Beli for " .. displayName)
+			A.CreateNoti({ Title = "Fighting Shop", Desc = msg, ShowTime = 5 })
+		end)
+	end
+	return false
 end
 
-SectionShopFighting.CreateToggle({ Title = "Black Leg", Desc = nil, Default = false }, function(f)
-	SaveSettings("Spam Join", f)
-	if f then
-		spawn(function()
-			while g["Black Leg"] and (task.wait()) do
-				local K, K = pcall(function()
-					local R = DetectNpc(G.BuyBlackLeg)
-					if t:DistanceFromCharacter(R.HumanoidRootPart.Position) < 8 then
-						game.ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyBlackLeg")
-					end
-					getgenv().BackupTween(R.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
-				if K then
-					print(K)
-				end
-			end
-		end)
-	end
+-- Direct Buy / Equip Buttons
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Black Leg [ $150,000 ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Black Leg", { "Black Leg" }, function(c) return c:InvokeServer("BuyBlackLeg") end, TeacherCFs["Black Leg"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Electro [ $500,000 ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Electro", { "Electro" }, function(c) return c:InvokeServer("BuyElectro") end, TeacherCFs["Electro"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Fishman Karate [ $750,000 ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Fishman Karate", { "Fishman Karate", "Water Kung Fu" }, function(c) return c:InvokeServer("BuyFishmanKarate") end, TeacherCFs["Fishman Karate"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Dragon Breath [ 1,500 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Dragon Breath", { "Dragon Claw", "Dragon Breath" }, function(c)
+			c:InvokeServer("BlackbeardReward", "DragonClaw", "1")
+			return c:InvokeServer("BlackbeardReward", "DragonClaw", "2")
+		end, TeacherCFs["Dragon Breath"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Superhuman [ $3,000,000 ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Superhuman", { "Superhuman" }, function(c) return c:InvokeServer("BuySuperhuman") end, TeacherCFs["Superhuman"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Death Step [ $2,500,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Death Step", { "Death Step" }, function(c) return c:InvokeServer("BuyDeathStep") end, TeacherCFs["Death Step"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Sharkman Karate [ $2,500,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Sharkman Karate", { "Sharkman Karate" }, function(c) return c:InvokeServer("BuySharkmanKarate") end, TeacherCFs["Sharkman Karate"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Electric Claw [ $3,000,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Electric Claw", { "Electric Claw" }, function(c)
+			c:InvokeServer("BuyElectricClaw", "Start")
+			return c:InvokeServer("BuyElectricClaw")
+		end, TeacherCFs["Electric Claw"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Dragon Talon [ $3,000,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Dragon Talon", { "Dragon Talon" }, function(c) return c:InvokeServer("BuyDragonTalon") end, TeacherCFs["Dragon Talon"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Godhuman [ $5,000,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Godhuman", { "Godhuman", "God Human" }, function(c) return c:InvokeServer("BuyGodhuman") end, TeacherCFs["Godhuman"])
+	end)
+end)
+
+SectionShopFighting.CreateButton({ Title = "Buy / Equip Sanguine Art [ $5,000,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		BuyOrEquipFightingStyle("Sanguine Art", { "Sanguine Art" }, function(c) return c:InvokeServer("BuySanguineArt") end, TeacherCFs["Sanguine Art"])
+	end)
+end)
+
+-- Auto Buy / Travel Toggles
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Black Leg", Desc = nil, Default = false }, function(f)
 	g["Black Leg"] = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "Fishman Karate", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g["Fishman Karate"] and (task.wait()) do
-				local K, K = pcall(function()
-					local R = DetectNpc(G.BuyFishmanKarate)
-					if t:DistanceFromCharacter(R.HumanoidRootPart.Position) < 8 then
-						game.ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyFishmanKarate")
-					end
-					getgenv().BackupTween(R.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
-				if K then
-					print(K)
+		task.spawn(function()
+			while g["Black Leg"] do
+				local ok = BuyOrEquipFightingStyle("Black Leg", { "Black Leg" }, function(c) return c:InvokeServer("BuyBlackLeg") end, TeacherCFs["Black Leg"])
+				if ok then
+					g["Black Leg"] = false
+					break
 				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Fishman Karate", Desc = nil, Default = false }, function(f)
 	g["Fishman Karate"] = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "Electro", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g.Electro and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuyElectro)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						game.ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyElectro")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g["Fishman Karate"] do
+				local ok = BuyOrEquipFightingStyle("Fishman Karate", { "Fishman Karate", "Water Kung Fu" }, function(c) return c:InvokeServer("BuyFishmanKarate") end, TeacherCFs["Fishman Karate"])
+				if ok then
+					g["Fishman Karate"] = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Electro", Desc = nil, Default = false }, function(f)
 	g.Electro = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "Dragon Breath", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g.DragonClaw and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.DragonClaw)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						game.ReplicatedStorage.Remotes.CommF_:InvokeServer("BlackbeardReward", "DragonClaw", "1")
-						game.ReplicatedStorage.Remotes.CommF_:InvokeServer("BlackbeardReward", "DragonClaw", "2")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g.Electro do
+				local ok = BuyOrEquipFightingStyle("Electro", { "Electro" }, function(c) return c:InvokeServer("BuyElectro") end, TeacherCFs["Electro"])
+				if ok then
+					g.Electro = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Dragon Breath", Desc = nil, Default = false }, function(f)
 	g.DragonClaw = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "SuperHuman", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g.SuperHuman and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuySuperhuman)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuySuperhuman")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g.DragonClaw do
+				local ok = BuyOrEquipFightingStyle("Dragon Breath", { "Dragon Claw", "Dragon Breath" }, function(c)
+					c:InvokeServer("BlackbeardReward", "DragonClaw", "1")
+					return c:InvokeServer("BlackbeardReward", "DragonClaw", "2")
+				end, TeacherCFs["Dragon Breath"])
+				if ok then
+					g.DragonClaw = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: SuperHuman", Desc = nil, Default = false }, function(f)
 	g.SuperHuman = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "Death Step", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g["Death Step"] and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuyDeathStep)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuyDeathStep")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g.SuperHuman do
+				local ok = BuyOrEquipFightingStyle("Superhuman", { "Superhuman" }, function(c) return c:InvokeServer("BuySuperhuman") end, TeacherCFs["Superhuman"])
+				if ok then
+					g.SuperHuman = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Death Step", Desc = nil, Default = false }, function(f)
 	g["Death Step"] = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "Sharkman Karate", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g["Sharkman Karate"] and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuySharkmanKarate)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuySharkmanKarate")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g["Death Step"] do
+				local ok = BuyOrEquipFightingStyle("Death Step", { "Death Step" }, function(c) return c:InvokeServer("BuyDeathStep") end, TeacherCFs["Death Step"])
+				if ok then
+					g["Death Step"] = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Sharkman Karate", Desc = nil, Default = false }, function(f)
 	g["Sharkman Karate"] = f
-end)
-
-SectionShopFighting.CreateToggle({ Title = "Electric Claw", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g["Electric Claw"] and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuyElectricClaw)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuyElectricClaw")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g["Sharkman Karate"] do
+				local ok = BuyOrEquipFightingStyle("Sharkman Karate", { "Sharkman Karate" }, function(c) return c:InvokeServer("BuySharkmanKarate") end, TeacherCFs["Sharkman Karate"])
+				if ok then
+					g["Sharkman Karate"] = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Electric Claw", Desc = nil, Default = false }, function(f)
 	g["Electric Claw"] = f
+	if f then
+		task.spawn(function()
+			while g["Electric Claw"] do
+				local ok = BuyOrEquipFightingStyle("Electric Claw", { "Electric Claw" }, function(c)
+					c:InvokeServer("BuyElectricClaw", "Start")
+					return c:InvokeServer("BuyElectricClaw")
+				end, TeacherCFs["Electric Claw"])
+				if ok then
+					g["Electric Claw"] = false
+					break
+				end
+				task.wait(3)
+			end
+		end)
+	end
 end)
 
-SectionShopFighting.CreateToggle({ Title = "Dragon Talon", Desc = nil, Default = false }, function(f)
-	if f then
-		spawn(function()
-			while g["Dragon Talon"] and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuyDragonTalon)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuyDragonTalon")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
-			end
-		end)
-	end
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Dragon Talon", Desc = nil, Default = false }, function(f)
 	g["Dragon Talon"] = f
-end)
-SectionShopFighting.CreateToggle({ Title = "God Human", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g["God Human"] and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuyGodhuman)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuyGodhuman")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g["Dragon Talon"] do
+				local ok = BuyOrEquipFightingStyle("Dragon Talon", { "Dragon Talon" }, function(c) return c:InvokeServer("BuyDragonTalon") end, TeacherCFs["Dragon Talon"])
+				if ok then
+					g["Dragon Talon"] = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: God Human", Desc = nil, Default = false }, function(f)
 	g["God Human"] = f
-end)
-SectionShopFighting.CreateToggle({ Title = "Sanguine Art", Desc = nil, Default = false }, function(f)
 	if f then
-		spawn(function()
-			while g["Sanguine Art"] and (task.wait()) do
-				pcall(function()
-					local K = DetectNpc(G.BuySanguineArt)
-					if t:DistanceFromCharacter(K.HumanoidRootPart.Position) < 8 then
-						Remote("BuySanguineArt")
-					end
-					getgenv().BackupTween(K.HumanoidRootPart.CFrame * CFrame.new(0, 4, 4))
-				end)
+		task.spawn(function()
+			while g["God Human"] do
+				local ok = BuyOrEquipFightingStyle("Godhuman", { "Godhuman", "God Human" }, function(c) return c:InvokeServer("BuyGodhuman") end, TeacherCFs["Godhuman"])
+				if ok then
+					g["God Human"] = false
+					break
+				end
+				task.wait(3)
 			end
 		end)
 	end
+end)
+
+SectionShopFighting.CreateToggle({ Title = "Auto Buy / Travel: Sanguine Art", Desc = nil, Default = false }, function(f)
 	g["Sanguine Art"] = f
+	if f then
+		task.spawn(function()
+			while g["Sanguine Art"] do
+				local ok = BuyOrEquipFightingStyle("Sanguine Art", { "Sanguine Art" }, function(c) return c:InvokeServer("BuySanguineArt") end, TeacherCFs["Sanguine Art"])
+				if ok then
+					g["Sanguine Art"] = false
+					break
+				end
+				task.wait(3)
+			end
+		end)
+	end
+end)
+
+SectionShopSwords = PageShop.CreateSection("Swords Shop")
+for _, sword in ipairs({
+	{ Name = "Katana", Price = "$5,000" },
+	{ Name = "Cutlass", Price = "$5,000" },
+	{ Name = "Dual Katana", Price = "$12,000" },
+	{ Name = "Iron Mace", Price = "$25,000" },
+	{ Name = "Triple Katana", Price = "$60,000" },
+	{ Name = "Pipe", Price = "$100,000" },
+	{ Name = "Dual-Headed Blade", Price = "$400,000" },
+	{ Name = "Soul Cane", Price = "$750,000" },
+	{ Name = "Bisento", Price = "$1,000,000" },
+}) do
+	SectionShopSwords.CreateButton({ Title = "Buy " .. sword.Name .. " [ " .. sword.Price .. " ]" }, function()
+		task.spawn(function()
+			game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BuyItem", sword.Name)
+		end)
+	end)
+end
+
+SectionShopGuns = PageShop.CreateSection("Guns Shop")
+for _, gun in ipairs({
+	{ Name = "Slingshot", Price = "$5,000" },
+	{ Name = "Musket", Price = "$8,000" },
+	{ Name = "Flintlock", Price = "$10,500" },
+	{ Name = "Refined Flintlock", Price = "$65,000" },
+	{ Name = "Dual Flintlock", Price = "$100,000" },
+	{ Name = "Cannon", Price = "$100,000" },
+}) do
+	SectionShopGuns.CreateButton({ Title = "Buy " .. gun.Name .. " [ " .. gun.Price .. " ]" }, function()
+		task.spawn(function()
+			game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BuyItem", gun.Name)
+		end)
+	end)
+end
+SectionShopGuns.CreateButton({ Title = "Buy Bizarre Rifle [ 25 Ectoplasm ]" }, function()
+	task.spawn(function()
+		game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("Ectoplasm", "Buy", 1)
+	end)
+end)
+
+SectionShopAccessories = PageShop.CreateSection("Accessories Shop")
+for _, acc in ipairs({
+	{ Name = "Black Cape", Price = "$50,000" },
+	{ Name = "Swordsman Hat", Price = "$150,000" },
+	{ Name = "Tomoe Ring", Price = "$500,000" },
+}) do
+	SectionShopAccessories.CreateButton({ Title = "Buy " .. acc.Name .. " [ " .. acc.Price .. " ]" }, function()
+		task.spawn(function()
+			game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BuyItem", acc.Name)
+		end)
+	end)
+end
+SectionShopAccessories.CreateButton({ Title = "Buy Ghoul Mask [ 50 Ectoplasm ]" }, function()
+	task.spawn(function()
+		game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("Ectoplasm", "Buy", 2)
+	end)
 end)
 SectionShopAbilities = PageShop.CreateSection("Abilities Shop")
 SectionShopAbilities.CreateButton({ Title = "Skyjump [ $10,000 Beli ]" }, function()
@@ -662,6 +874,12 @@ SectionShopAbilities.CreateButton({ Title = "Skyjump [ $10,000 Beli ]" }, functi
 end)
 SectionShopAbilities.CreateButton({ Title = "Buso Haki [ $25,000 Beli ]" }, function()
 	game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("BuyHaki", "Buso")
+end)
+SectionShopAbilities.CreateButton({ Title = "Observation Haki V2 [ $5,000,000 + 5,000 Frags ]" }, function()
+	task.spawn(function()
+		game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("KenTalk2", "Start")
+		game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("KenTalk2", "Buy")
+	end)
 end)
 SectionShopAbilities.CreateButton({ Title = "Observation haki [ $750,000 Beli ]" }, function()
 	game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("KenTalk", "Buy")
@@ -1841,7 +2059,12 @@ function SetNoClip(l)
 			end
 		end
 		if TweenManager and (TweenManager.TweenRunning or TweenManager.currentTween ~= nil) then
-			L:ChangeState(11)
+			pcall(function()
+				L:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+				L:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+				L:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+				L:ChangeState(Enum.HumanoidStateType.Swimming)
+			end)
 		end
 	else
 		local stillNoclip = (typeof(ToggleNoclip) == "function" and ToggleNoclip())
@@ -1855,9 +2078,14 @@ function SetNoClip(l)
 			end
 			if L then
 				L.PlatformStand = false
-				if L:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-					L:ChangeState(Enum.HumanoidStateType.Running)
-				end
+				pcall(function()
+					L:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+					L:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+					L:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+					if L:GetState() == Enum.HumanoidStateType.Swimming or L:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+						L:ChangeState(Enum.HumanoidStateType.Running)
+					end
+				end)
 			end
 			if S and S:FindFirstChild("FloatForce") then
 				pcall(function() S.FloatForce:Destroy() end)
@@ -2025,16 +2253,31 @@ getgenv().BananaNoclipConn = runService.Stepped:Connect(function()
 					part.CanCollide = false
 				end
 			end
-			-- ONLY enter StrafingNoPhysics when ACTIVELY tweening through air/walls
+			-- Enter Swimming state during active tween flight for smooth aerodynamic posture
 			if isTweening then
-				hum:ChangeState(11) -- StrafingNoPhysics disables terrain/part collision physics during flight
-			elseif hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+				pcall(function()
+					hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+					hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+					hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+					hum:ChangeState(Enum.HumanoidStateType.Swimming)
+				end)
+			elseif hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
 				-- When not actively tweening, restore Running state so jumping and walking work normally!
-				hum:ChangeState(Enum.HumanoidStateType.Running)
+				pcall(function()
+					hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+					hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+					hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+					hum:ChangeState(Enum.HumanoidStateType.Running)
+				end)
 			end
 		else
-			if hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-				hum:ChangeState(Enum.HumanoidStateType.Running)
+			if hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+				pcall(function()
+					hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+					hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+					hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+					hum:ChangeState(Enum.HumanoidStateType.Running)
+				end)
 			end
 			if hrp and hrp:FindFirstChild("FloatForce") and not (G or ReadyToDodge) then
 				pcall(function() hrp.FloatForce:Destroy() end)
@@ -2073,8 +2316,15 @@ getgenv().TweenManager = {
 			pcall(function() hrp.FloatForce:Destroy() end)
 		end
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if hum and hum.Health > 0 and hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-			pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running) end)
+		if hum and hum.Health > 0 then
+			pcall(function()
+				hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+				hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+				hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				if hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+					hum:ChangeState(Enum.HumanoidStateType.Running)
+				end
+			end)
 		end
 	end,
 	PlayTween = function(Q, S, L, d)
@@ -2133,11 +2383,16 @@ getgenv().TweenManager = {
 					end
 				end
 				local S = l:FindFirstChildOfClass("Humanoid")
-				if S then
+				if S and S.Health > 0 then
 					S.PlatformStand = false
-					if S.Health > 0 and S:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-						pcall(function() S:ChangeState(Enum.HumanoidStateType.Running) end)
-					end
+					pcall(function()
+						S:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+						S:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+						S:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+						if S:GetState() == Enum.HumanoidStateType.Swimming or S:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+							S:ChangeState(Enum.HumanoidStateType.Running)
+						end
+					end)
 				end
 				if Q and (Q:FindFirstChild("FloatForce")) then
 					pcall(function() Q.FloatForce:Destroy() end)
@@ -2224,35 +2479,52 @@ task.spawn(function()
 	end
 end)
 spawn(function()
-	local S = (game.ReplicatedStorage.Remotes.CommF_:InvokeServer("GetUnlockables"))
-	repeat
-		task.wait()
-		S = (game.ReplicatedStorage.Remotes.CommF_:InvokeServer("GetUnlockables"))
-	until S
-	if S.DefeatedIndraTrueForm and game.PlaceId == getgenv().CheckPlaceId then
-		Q["Caslte On The Sea"] = Vector3.new(-4967.6826171875, 314.88238525390625, -3157.098388671875)
-		Q.Hydra = Vector3.new(5661.5302734375, 1013.4113159179688, -334.9619140625)
-		Q.Mansion = Vector3.new(-12463.8740234375, 374.9144592285156, -7523.77392578125)
-	end
-	if game.PlaceId == getgenv().CheckPlaceId then
+	local place = game.PlaceId
+	local isSea1 = (place == 2753915549 or place == 85211729168715 or place == getgenv().CheckPlaceId3)
+	local isSea2 = (place == 4442272183 or place == 79091703265657 or place == getgenv().CheckPlaceId2)
+	local isSea3 = (place == 7449423635 or place == 100117331123089 or place == getgenv().CheckPlaceId)
+
+	if isSea1 then
+		Q = {
+			Sky3 = Vector3.new(-7894, 5547, -380),
+			Sky3Exit = Vector3.new(-4607, 874, -1667),
+			UnderWater = Vector3.new(61163, 11, 1819),
+			["Underwater City"] = Vector3.new(61165.19, 0.18, 1897.38),
+			["Pirate Village"] = Vector3.new(-1242.46, 4.79, 3901.28),
+			UnderwaterExit = Vector3.new(4050, -1, -1814),
+		}
+	elseif isSea2 then
+		Q = {
+			["122"] = Vector3.new(923.21252441406, 126.9760055542, 32852.83203125),
+			["3032"] = Vector3.new(-6508.5581054688, 89.034996032715, -132.83953857422),
+			Mansion = Vector3.new(-390, 332, 673),
+			SwanRoom = Vector3.new(2285, 15, 905),
+			CursedShip = Vector3.new(923, 126, 32852),
+			ZombieIsland = Vector3.new(-6509, 83, -133),
+		}
+	elseif isSea3 then
 		Q["Temple Clock"] = Vector3.new(28282.5703125, 14896.8505859375, 105.1042709350586)
 	end
-	if game.PlaceId == getgenv().CheckPlaceId2 then
-		Q["122"] = Vector3.new(923.21252441406, 126.9760055542, 32852.83203125)
-		Q["3032"] = Vector3.new(-6508.5581054688, 89.034996032715, -132.83953857422)
-	end
-	if S.FlamingoAccess and game.PlaceId == getgenv().CheckPlaceId2 then
-		Q.Mansion = Vector3.new(-288.46246337890625, 306.130615234375, 597.9988403320312)
-		Q.Flamingo = Vector3.new(2284.912109375, 15.152046203613281, 905.48291015625)
-	end
-	local S, L = game.PlaceId, getgenv().CheckPlaceId3
-	if S == L then
-		Q = {
-			["1"] = Vector3.new(-7894.6201171875, 5545.49169921875, -380.2467346191406),
-			["2"] = Vector3.new(-4607.82275390625, 872.5422973632812, -1667.556884765625),
-			["3"] = Vector3.new(61163.8515625, 11.759522438049316, 1819.7841796875),
-		}
-	end
+
+	-- Check optional unlockables in background safely without blocking
+	task.spawn(function()
+		pcall(function()
+			local comm = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 5) and game:GetService("ReplicatedStorage").Remotes:WaitForChild("CommF_", 5)
+			if not comm then return end
+			local S = comm:InvokeServer("GetUnlockables")
+			if type(S) == "table" then
+				if S.DefeatedIndraTrueForm and isSea3 then
+					Q["Caslte On The Sea"] = Vector3.new(-4967.6826171875, 314.88238525390625, -3157.098388671875)
+					Q.Hydra = Vector3.new(5661.5302734375, 1013.4113159179688, -334.9619140625)
+					Q.Mansion = Vector3.new(-12463.8740234375, 374.9144592285156, -7523.77392578125)
+				end
+				if S.FlamingoAccess and isSea2 then
+					Q.Mansion = Vector3.new(-288.46246337890625, 306.130615234375, 597.9988403320312)
+					Q.Flamingo = Vector3.new(2284.912109375, 15.152046203613281, 905.48291015625)
+				end
+			end
+		end)
+	end)
 end)
 local S, L, d = game:GetService("Players"), game:GetService("ReplicatedStorage"), game:GetService("VirtualInputManager")
 local function _()
@@ -2726,8 +2998,15 @@ local function B(Z, C, J, F)
 			pcall(function() hrp.FloatForce:Destroy() end)
 		end
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if hum and hum.Health > 0 and hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-			pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running) end)
+		if hum and hum.Health > 0 then
+			pcall(function()
+				hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+				hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+				hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				if hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+					hum:ChangeState(Enum.HumanoidStateType.Running)
+				end
+			end)
 		end
 	end
 
@@ -2765,12 +3044,22 @@ local function B(Z, C, J, F)
 		local distanceTraveled = 0
 		local lastTick = tick()
 
-		-- QuantumOnyx & Banana Hub high-speed DeltaTime Lerp Loop
+		-- QuantumOnyx & Banana Hub high-speed DeltaTime Lerp Loop with Aerodynamic Flight Pose
 		while not isCancelled do
 			local charNow = t.Character
 			local humNow = charNow and charNow:FindFirstChildOfClass("Humanoid")
 			if not charNow or Z.Parent ~= charNow or not humNow or humNow.Health <= 0 or Z.Anchored then
 				break
+			end
+
+			-- Continuously maintain Swimming flight animation state during flight
+			if humNow:GetState() ~= Enum.HumanoidStateType.Swimming then
+				pcall(function()
+					humNow:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+					humNow:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+					humNow:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+					humNow:ChangeState(Enum.HumanoidStateType.Swimming)
+				end)
 			end
 
 			local dt = x.Heartbeat:Wait()
@@ -2782,8 +3071,35 @@ local function B(Z, C, J, F)
 			distanceTraveled = distanceTraveled + (targetSpeed * elapsed)
 			local alpha = math.clamp(distanceTraveled / totalDistance, 0, 1)
 
-			-- Simultaneous position and rotation interpolation (silky smooth 60-144 FPS)
-			Z.CFrame = startCF:Lerp(goalCF, alpha)
+			local currentPos = startCF.Position:Lerp(goalCF.Position, alpha)
+			local moveVec = goalCF.Position - currentPos
+
+			-- Dynamic forward-facing flight orientation (gliding like top Blox Fruits scripts)
+			if totalDistance > 10 and alpha < 0.9 and moveVec.Magnitude > 1 then
+				local lookTarget = currentPos + moveVec
+				local flightCF
+				if math.abs(moveVec.Unit.Y) > 0.95 then
+					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 0, 1))
+				else
+					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 1, 0))
+				end
+				Z.CFrame = flightCF
+			elseif totalDistance > 10 and alpha >= 0.9 and alpha < 1 then
+				local lookTarget = currentPos + moveVec
+				local flightCF
+				if moveVec.Magnitude > 0.1 and math.abs(moveVec.Unit.Y) > 0.95 then
+					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 0, 1))
+				elseif moveVec.Magnitude > 0.1 then
+					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 1, 0))
+				else
+					flightCF = goalCF
+				end
+				local blend = (alpha - 0.9) / 0.1
+				Z.CFrame = flightCF:Lerp(goalCF, blend)
+			else
+				Z.CFrame = startCF:Lerp(goalCF, alpha)
+			end
+
 			Z.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 			Z.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 
@@ -3084,10 +3400,10 @@ function toTarget(P, e)
 			end
 		end
 		local l, d, _
-		if Y >= 3000 and Q and next(Q) then
+		if Y >= 2500 and Q and next(Q) then
 			for o, y in pairs(Q) do
 				local distToEntrance = (P.Position - y).Magnitude
-				if distToEntrance <= 3000 and distToEntrance < (Y - 500) and (not _ or distToEntrance < _) then
+				if (distToEntrance <= 3500 or (Y - distToEntrance) > 3000) and distToEntrance < (Y - 300) and (not _ or distToEntrance < _) then
 					_, l, d = distToEntrance, o, y
 				end
 			end
@@ -4521,7 +4837,7 @@ local LevelQuestMapping = {
 	{ Min = 375, Max = 399, Quest = "FishmanQuest", Id = 1, Mob = "Fishman Warrior", PosQ = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734), PosM = CFrame.new(60878.30078125, 18.482830047607, 1543.7574462891) },
 	{ Min = 400, Max = 449, Quest = "FishmanQuest", Id = 2, Mob = "Fishman Commando", PosQ = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734), PosM = CFrame.new(61922.6328125, 18.482830047607, 1493.9343261719) },
 	{ Min = 450, Max = 474, Quest = "SkyExp1Quest", Id = 1, Mob = "God's Guard", PosQ = CFrame.new(-4721.88867, 843.874695, -1949.96643), PosM = CFrame.new(-4710.04296875, 845.27697753906, -1927.3079833984) },
-	{ Min = 475, Max = 524, Quest = "SkyExp1Quest", Id = 2, Mob = "Shanda", PosQ = CFrame.new(-7859.09814, 5544.19043, -381.476196), PosM = CFrame.new(-7678.4897460938, 5566.4038085938, -497.21560668945) },
+	{ Min = 475, Max = 524, Quest = "SkyExp1Quest", Id = 2, Mob = "Shanda", PosQ = CFrame.new(-4721.88867, 843.874695, -1949.96643), PosM = CFrame.new(-7678.4897460938, 5566.4038085938, -497.21560668945) },
 	{ Min = 525, Max = 549, Quest = "SkyExp2Quest", Id = 1, Mob = "Royal Squad", PosQ = CFrame.new(-7906.81592, 5634.6626, -1411.99194), PosM = CFrame.new(-7624.2524414062, 5658.1333007812, -1467.3542480469) },
 	{ Min = 550, Max = 624, Quest = "SkyExp2Quest", Id = 2, Mob = "Royal Soldier", PosQ = CFrame.new(-7906.81592, 5634.6626, -1411.99194), PosM = CFrame.new(-7836.7534179688, 5645.6640625, -1790.6236572266) },
 	{ Min = 625, Max = 649, Quest = "FountainQuest", Id = 1, Mob = "Galley Pirate", PosQ = CFrame.new(5259.81982, 37.3500175, 4050.0293), PosM = CFrame.new(5551.0219726562, 78.901351928711, 3930.4128417969) },
@@ -4866,7 +5182,7 @@ function CFrameQuest()
 	getgenv().questpoint.ColosseumQuest = CFrame.new(-1580.04663, 6.35000277, -2986.47534)
 	getgenv().questpoint.MagmaQuest = CFrame.new(-5313.37012, 10.9500084, 8515.29395)
 	getgenv().questpoint.FishmanQuest = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734)
-	getgenv().questpoint.SkyExp1Quest = CFrame.new(-7859.09814, 5544.19043, -381.476196)
+	getgenv().questpoint.SkyExp1Quest = CFrame.new(-4721.88867, 843.874695, -1949.96643)
 	getgenv().questpoint.SkyExp2Quest = CFrame.new(-7906.81592, 5634.6626, -1411.99194)
 	getgenv().questpoint.FountainQuest = CFrame.new(5259.81982, 37.3500175, 4050.0293)
 	getgenv().questpoint.Area1Quest = CFrame.new(-429.543518, 71.7699966, 1836.18188)
@@ -4983,8 +5299,27 @@ TakeQuestLevel = function()
 	if not V or not V.Pos then
 		return
 	end
-	local H = (typeof(V.Pos) == "CFrame" and V.Pos.Position) or (typeof(V.Pos) == "Vector3" and V.Pos) or (type(V.Pos) == "table" and (V.Pos.Position or V.Pos))
-	if not H then return end
+
+	-- Dynamically detect quest giver NPC in workspace.NPCs if present
+	local npcCF = nil
+	local npcsFolder = workspace:FindFirstChild("NPCs")
+	if npcsFolder then
+		for _, npc in ipairs(npcsFolder:GetChildren()) do
+			if npc:FindFirstChild("HumanoidRootPart") then
+				local nName = npc.Name:lower()
+				if (V.QuestName and nName:find(V.QuestName:lower()))
+					or (V.Name and nName:find(V.Name:lower()))
+					or (V.QuestName == "SkyExp1Quest" and (nName:find("sky quest giver") or nName:find("mole")))
+				then
+					npcCF = npc.HumanoidRootPart.CFrame
+					break
+				end
+			end
+		end
+	end
+
+	local questCF = npcCF or ((typeof(V.Pos) == "CFrame" and V.Pos) or CFrame.new(V.Pos))
+	local H = questCF.Position
 	local B = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
 	local C = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
 	if not B or not C then
@@ -4997,8 +5332,7 @@ TakeQuestLevel = function()
 		end
 		task.wait(0.5)
 	else
-		local targetCF = (typeof(V.Pos) == "CFrame" and V.Pos) or CFrame.new(H)
-		toTarget(targetCF * CFrame.new(0, 4, 2), true)
+		toTarget(questCF * CFrame.new(0, 4, 2), true)
 	end
 end
 
@@ -5667,6 +6001,7 @@ function FarmMethod()
 							or not Settings["Start Farm"]
 							or not StackFarm
 						task.wait(1)
+						DeleteIgnoredMobSpawn()
 					else
 						DeleteIgnoredMobSpawn()
 					end
