@@ -55,8 +55,8 @@ function ReadSetting()
 	end
 end
 Settings = ReadSetting()
-if not Settings["Speed Tween "] then
-	Settings["Speed Tween "] = 180
+if not Settings["Speed Tween "] or Settings["Speed Tween "] == 150 or Settings["Speed Tween "] == 180 or (tonumber(Settings["Speed Tween "]) or 0) > 220 then
+	Settings["Speed Tween "] = 190
 end
 if not Settings["Select Method Farm"] or Settings["Select Method Farm"] == "" or Settings["Select Method Farm"] == "Aura Farm" then
 	Settings["Select Method Farm"] = "Level Farm"
@@ -231,6 +231,384 @@ SeaEventTab = SeaEventTab or Main.CreatePage({ Page_Name = "Sea Event", Page_Tit
 RaceMain = RaceMain or Main.CreatePage({ Page_Name = "Upgrade Race", Page_Title = "Upgrade Race Tab" })
 GetItemsMain = GetItemsMain or Main.CreatePage({ Page_Name = "Get and Upgrade Items", Page_Title = "Get and Upgrade Items Tab" })
 VolcanoTab = VolcanoTab or Main.CreatePage({ Page_Name = "Volcano Event", Page_Title = "Volcano Event Tab" })
+HalloweenTab = HalloweenTab or Main.CreatePage({ Page_Name = "Halloween Event", Page_Title = "Halloween Event Tab" })
+-----------------------------------------------------------------------------
+-- HALLOWEEN EVENT (REVERSE-ENGINEERED FROM LIVE BLOX FRUITS RUNTIME)
+-----------------------------------------------------------------------------
+HalloweenTab = HalloweenTab or Main.CreatePage({ Page_Name = "Halloween Event", Page_Title = "Halloween Event Tab" })
+local HalloweenTrickSection = HalloweenTab.CreateSection("Trick or Treat (Doors)")
+local HalloweenPumpkinSection = HalloweenTab.CreateSection("Pumpkin Hunt & Candy")
+local HalloweenBossSection = HalloweenTab.CreateSection("Halloween Event Bosses")
+local HalloweenRitualSection = HalloweenTab.CreateSection("Ritual & Gacha")
+
+local HalloweenRemotes = {
+	Function = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 9):FindFirstChild("HalloweenFunction"),
+	Event = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 9):FindFirstChild("HalloweenEvent"),
+	Portal = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 9):FindFirstChild("HalloweenPortal"),
+	Ritual = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 9):FindFirstChild("DapperJackRitual")
+}
+
+-- 1. Helper: Find Available Halloween Doors (Trick or Treat)
+local function GetAvailableHalloweenDoors()
+	local doors = {}
+	local serverTime = workspace:GetServerTimeNow()
+	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local myPos = hrp and hrp.Position or Vector3.zero
+
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj.Name == "HalloweenDoor" and obj:IsA("Model") then
+			local prox = obj:FindFirstChild("Proximity")
+			local doorPos = prox and prox.Position or obj:GetPivot().Position
+			local cooldown = obj:GetAttribute("CooldownUntil")
+
+			-- Check if door is off cooldown
+			if not cooldown or (typeof(cooldown) == "number" and serverTime >= cooldown) then
+				table.insert(doors, {
+					model = obj,
+					pos = doorPos,
+					dist = (doorPos - myPos).Magnitude
+				})
+			end
+		end
+	end
+
+	table.sort(doors, function(a, b) return a.dist < b.dist end)
+	return doors
+end
+
+-- 2. Helper: Find Nearest Pumpkin in PumpkinHunt
+local function GetNearestPumpkin()
+	local folder = workspace:FindFirstChild("PumpkinHunt")
+	if not folder then return nil end
+	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local myPos = hrp and hrp.Position or Vector3.zero
+	local nearest, nearestDist = nil, math.huge
+
+	for _, p in ipairs(folder:GetChildren()) do
+		if (p.Name == "Pumpkin" or p.Name == "PumpkinPatch") and p:IsA("Model") then
+			local pos = p:GetPivot().Position
+			local dist = (pos - myPos).Magnitude
+			if dist < nearestDist then
+				nearestDist = dist
+				nearest = p
+			end
+		end
+	end
+	return nearest
+end
+
+-- 3. Helper: Find Halloween Event Bosses & Mobs
+local function GetHalloweenBoss(bossName)
+	local enemies = workspace:FindFirstChild("Enemies")
+	if not enemies then return nil end
+	for _, m in ipairs(enemies:GetChildren()) do
+		if m:IsA("Model") and IsMobAlive(m) then
+			if bossName then
+				if m.Name:lower():find(bossName:lower()) then
+					return m
+				end
+			else
+				local n = m.Name:lower()
+				if n:find("jack o' lantern") or n:find("pumpkin snowman") or n:find("dapper jack") or n:find("werewolf") or n:find("hellfire gas") then
+					return m
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- 4. Helper: Find Candy Spill items
+local function GetCandySpillPieces()
+	local pieces = {}
+	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local myPos = hrp and hrp.Position or Vector3.zero
+
+	local tagged = game:GetService("CollectionService"):GetTagged("HalloweenCandySpill")
+	for _, obj in ipairs(tagged) do
+		local pos = obj:IsA("BasePart") and obj.Position or (obj:IsA("Model") and obj:GetPivot().Position or nil)
+		if pos then
+			table.insert(pieces, { obj = obj, pos = pos, dist = (pos - myPos).Magnitude })
+		end
+	end
+
+	for _, child in ipairs(workspace:GetChildren()) do
+		if child.Name:sub(1, 6) == "Candy_" or child.Name:sub(1, 6) == "Chest_" then
+			local pos = child:IsA("BasePart") and child.Position or (child:IsA("Model") and child:GetPivot().Position or nil)
+			if pos then
+				table.insert(pieces, { obj = child, pos = pos, dist = (pos - myPos).Magnitude })
+			end
+		end
+	end
+
+	table.sort(pieces, function(a, b) return a.dist < b.dist end)
+	return pieces
+end
+
+-----------------------------------------------------------------------------
+-- SECTION 1: TRICK OR TREAT (DOORS)
+-----------------------------------------------------------------------------
+HalloweenTrickSection.CreateToggle(
+	{ Title = "Auto Trick or Treat", Desc = "Knocks on Halloween doors across towns to collect up to 500 Candy per door", Default = Settings["Auto Trick or Treat"] or false },
+	function(v)
+		SaveSettings("Auto Trick or Treat", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Trick or Treat"] and task.wait(0.5) do
+					pcall(function()
+						local doors = GetAvailableHalloweenDoors()
+						if #doors > 0 then
+							local target = doors[1]
+							StackFarm = false
+							StackFarmOther = false
+							toTarget(CFrame.new(target.pos) * CFrame.new(0, 3, 0))
+							task.wait(0.3)
+							if HalloweenRemotes.Function then
+								HalloweenRemotes.Function:InvokeServer(target.model)
+							end
+							local prox = target.model:FindFirstChild("Proximity") and target.model.Proximity:FindFirstChildOfClass("ProximityPrompt")
+							if prox and fireproximityprompt then
+								pcall(fireproximityprompt, prox)
+							end
+							task.wait(1.2)
+						elseif Settings["Hop Server When No Doors"] then
+							HopServer()
+							task.wait(5)
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+HalloweenTrickSection.CreateToggle(
+	{ Title = "Hop Server When All Doors on Cooldown", Desc = "Server hops automatically once all doors are exhausted", Default = Settings["Hop Server When No Doors"] or false },
+	function(v)
+		SaveSettings("Hop Server When No Doors", v)
+	end
+)
+
+-----------------------------------------------------------------------------
+-- SECTION 2: PUMPKIN HUNT & CANDY SPILL
+-----------------------------------------------------------------------------
+HalloweenPumpkinSection.CreateToggle(
+	{ Title = "Auto Pumpkin Hunt", Desc = "Locates and punches pumpkins 3 times to break them and collect event drops", Default = Settings["Auto Pumpkin Hunt"] or false },
+	function(v)
+		SaveSettings("Auto Pumpkin Hunt", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Pumpkin Hunt"] and task.wait(0.2) do
+					pcall(function()
+						local pumpkin = GetNearestPumpkin()
+						if pumpkin and pumpkin.Parent then
+							StackFarm = false
+							StackFarmOther = false
+							local root = pumpkin:FindFirstChild("RootPart") or pumpkin.PrimaryPart or pumpkin:FindFirstChildWhichIsA("BasePart")
+							local targetCF = root and root.CFrame or pumpkin:GetPivot()
+							toTarget(targetCF * CFrame.new(0, 3, 0))
+							if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
+							ClickM1(pumpkin)
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+HalloweenPumpkinSection.CreateToggle(
+	{ Title = "Auto Collect Candy Corn / Spill", Desc = "Sweeps and claims dropped Candy Corn and chests on the map", Default = Settings["Auto Collect Candy Corn"] or false },
+	function(v)
+		SaveSettings("Auto Collect Candy Corn", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Collect Candy Corn"] and task.wait(0.3) do
+					pcall(function()
+						local candies = GetCandySpillPieces()
+						if #candies > 0 then
+							StackFarm = false
+							StackFarmOther = false
+							local target = candies[1]
+							toTarget(CFrame.new(target.pos))
+							if HalloweenRemotes.Event then
+								local pieceId = tonumber(target.obj.Name:match("Candy_(%d+)")) or tonumber(target.obj.Name:match("Chest_.*_(%d+)"))
+								if pieceId then
+									HalloweenRemotes.Event:FireServer("CandySpillClaim", pieceId)
+								end
+							end
+							task.wait(0.1)
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+-----------------------------------------------------------------------------
+-- SECTION 3: HALLOWEEN EVENT BOSSES
+-----------------------------------------------------------------------------
+HalloweenBossSection.CreateToggle(
+	{ Title = "Auto Farm Dapper Jack", Desc = "Hunts the Dapper Jack boss and auto-claims reward cards", Default = Settings["Auto Farm Dapper Jack"] or false },
+	function(v)
+		SaveSettings("Auto Farm Dapper Jack", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Farm Dapper Jack"] and task.wait(0.2) do
+					pcall(function()
+						local boss = GetHalloweenBoss("Dapper Jack")
+						if boss and IsMobAlive(boss) then
+							StackFarm = false
+							StackFarmOther = false
+							local hrp = boss:FindFirstChild("HumanoidRootPart")
+							if hrp then
+								toTarget(hrp.CFrame * CFrame.new(0, 25, 0))
+								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
+								ClickM1(boss)
+								if HalloweenRemotes.Event then
+									HalloweenRemotes.Event:FireServer("DapperJackCardClaim")
+								end
+							end
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+HalloweenBossSection.CreateToggle(
+	{ Title = "Auto Farm Jack o' Lantern & Mobs", Desc = "Attacks event mobs (Jack o' Lantern / Snowman) for candy and seeds", Default = Settings["Auto Farm Jack o' Lantern"] or false },
+	function(v)
+		SaveSettings("Auto Farm Jack o' Lantern", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Farm Jack o' Lantern"] and task.wait(0.2) do
+					pcall(function()
+						local mob = GetHalloweenBoss("Jack o' Lantern") or GetHalloweenBoss("Snowman")
+						if mob and IsMobAlive(mob) then
+							StackFarm = false
+							StackFarmOther = false
+							local hrp = mob:FindFirstChild("HumanoidRootPart")
+							if hrp then
+								toTarget(hrp.CFrame * CFrame.new(0, 20, 0))
+								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
+								ClickM1(mob)
+							end
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+HalloweenBossSection.CreateToggle(
+	{ Title = "Auto Farm Werewolf", Desc = "Farms Werewolf boss whenever spawned", Default = Settings["Auto Farm Werewolf"] or false },
+	function(v)
+		SaveSettings("Auto Farm Werewolf", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Farm Werewolf"] and task.wait(0.3) do
+					pcall(function()
+						local boss = GetHalloweenBoss("Werewolf")
+						if boss and IsMobAlive(boss) then
+							StackFarm = false
+							StackFarmOther = false
+							local hrp = boss:FindFirstChild("HumanoidRootPart")
+							if hrp then
+								toTarget(hrp.CFrame * CFrame.new(0, 22, 0))
+								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
+								ClickM1(boss)
+							end
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+HalloweenBossSection.CreateToggle(
+	{ Title = "Auto Farm Hellfire Gas", Desc = "Farms Hellfire Gas boss whenever spawned", Default = Settings["Auto Farm Hellfire Gas"] or false },
+	function(v)
+		SaveSettings("Auto Farm Hellfire Gas", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Farm Hellfire Gas"] and task.wait(0.3) do
+					pcall(function()
+						local boss = GetHalloweenBoss("Hellfire Gas")
+						if boss and IsMobAlive(boss) then
+							StackFarm = false
+							StackFarmOther = false
+							local hrp = boss:FindFirstChild("HumanoidRootPart")
+							if hrp then
+								toTarget(hrp.CFrame * CFrame.new(0, 25, 0))
+								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
+								ClickM1(boss)
+							end
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+-----------------------------------------------------------------------------
+-- SECTION 4: RITUAL, PORTAL & GACHA
+-----------------------------------------------------------------------------
+HalloweenRitualSection.CreateButton(
+	{ Title = "Enter Halloween Realm / Portal" },
+	function()
+		pcall(function()
+			if HalloweenRemotes.Portal then
+				HalloweenRemotes.Portal:InvokeServer()
+			end
+		end)
+	end
+)
+
+HalloweenRitualSection.CreateToggle(
+	{ Title = "Auto Summon Great Pumpkin / Ritual", Desc = "Invokes Dapper Jack ritual / Great Pumpkin altar when ready", Default = Settings["Auto Summon Great Pumpkin"] or false },
+	function(v)
+		SaveSettings("Auto Summon Great Pumpkin", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Summon Great Pumpkin"] and task.wait(2) do
+					pcall(function()
+						if HalloweenRemotes.Ritual then
+							HalloweenRemotes.Ritual:InvokeServer("StartRitual")
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+HalloweenRitualSection.CreateToggle(
+	{ Title = "Auto Roll Halloween Gacha", Desc = "Rolls the Halloween Event Gacha automatically using collected Candy", Default = Settings["Auto Roll Halloween Gacha"] or false },
+	function(v)
+		SaveSettings("Auto Roll Halloween Gacha", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Roll Halloween Gacha"] and task.wait(3) do
+					pcall(function()
+						if HalloweenRemotes.Function then
+							HalloweenRemotes.Function:InvokeServer("RollGacha")
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
 ESPTab = ESPTab or Main.CreatePage({ Page_Name = "ESP", Page_Title = "ESP Tab" })
 PvpTab = PvpTab or Main.CreatePage({ Page_Name = "PVP", Page_Title = "PVP Tab" })
 TabWebhook = TabWebhook or Main.CreatePage({ Page_Name = "Tab Webhook", Page_Title = "Tab Webhook" })
@@ -476,13 +854,24 @@ local function BuyOrEquipFightingStyle(displayName, toolNames, remoteCallFn, fal
 		return false
 	end
 
-	-- 1. Direct Remote Call: Instantly equips if unlocked or purchases if eligible
+	-- 1. If already equipped in backpack/character, notify and return true
+	local alreadyEquipped, equipName = CheckOwned()
+	if alreadyEquipped then
+		pcall(function()
+			A.CreateNoti({ Title = "Fighting Shop", Desc = "Already have " .. (equipName or displayName) .. " equipped!", ShowTime = 3 })
+		end)
+		return true
+	end
+
+	-- Quick non-blocking attempt to equip if already unlocked
 	local res = nil
-	pcall(function()
-		res = remoteCallFn(commF)
+	task.spawn(function()
+		pcall(function()
+			res = remoteCallFn(commF)
+		end)
 	end)
 
-	task.wait(0.2)
+	task.wait(0.5)
 	local isOwned, equippedName = CheckOwned()
 	if isOwned then
 		pcall(function()
@@ -528,30 +917,49 @@ local function BuyOrEquipFightingStyle(displayName, toolNames, remoteCallFn, fal
 		end
 		local lp = game.Players.LocalPlayer or t
 		local hrp = lp and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
-		if hrp and (hrp.Position - targetCF.Position).Magnitude < 18 then
+		if hrp and (hrp.Position - targetCF.Position).Magnitude < 25 then
 			break
 		end
 	until tick() - startT > 25
 
-	-- Re-invoke remote at teacher
-	task.wait(0.3)
-	pcall(function()
-		res = remoteCallFn(commF)
+	-- Re-invoke remote at teacher (non-blocking) and handle Dialogue options
+	task.wait(0.4)
+	task.spawn(function()
+		pcall(function()
+			res = remoteCallFn(commF)
+		end)
 	end)
 
-	task.wait(0.2)
-	local isOwnedAfter, equippedNameAfter = CheckOwned()
-	if isOwnedAfter then
-		pcall(function()
-			A.CreateNoti({ Title = "Fighting Shop", Desc = "Successfully acquired " .. (equippedNameAfter or displayName) .. "!", ShowTime = 5 })
-		end)
-		return true
-	else
-		pcall(function()
-			local msg = (type(res) == "string" and res) or ("Check prerequisites / Beli for " .. displayName)
-			A.CreateNoti({ Title = "Fighting Shop", Desc = msg, ShowTime = 5 })
-		end)
+	-- Handle Dialogue confirmation buttons if opened
+	local lp = game.Players.LocalPlayer or t
+	local pgui = lp and lp:FindFirstChild("PlayerGui")
+	local mainGui = pgui and pgui:FindFirstChild("Main")
+	local dialogue = mainGui and mainGui:FindFirstChild("Dialogue")
+	local opt1 = dialogue and dialogue:FindFirstChild("Option1")
+	for _ = 1, 10 do
+		task.wait(0.2)
+		if dialogue and dialogue.Visible and opt1 and opt1.Visible then
+			pcall(function()
+				if typeof(firesignal) == "function" then
+					firesignal(opt1.MouseButton1Click)
+				elseif typeof(fireclickdetector) == "function" then
+					opt1:Activate()
+				end
+			end)
+		end
+		local isOwnedAfter, equippedNameAfter = CheckOwned()
+		if isOwnedAfter then
+			pcall(function()
+				A.CreateNoti({ Title = "Fighting Shop", Desc = "Successfully acquired " .. (equippedNameAfter or displayName) .. "!", ShowTime = 5 })
+			end)
+			return true
+		end
 	end
+
+	pcall(function()
+		local msg = (type(res) == "string" and res) or ("Check prerequisites / Beli for " .. displayName)
+		A.CreateNoti({ Title = "Fighting Shop", Desc = msg, ShowTime = 5 })
+	end)
 	return false
 end
 
@@ -2058,14 +2466,6 @@ function SetNoClip(l)
 				part.CanCollide = false
 			end
 		end
-		if TweenManager and (TweenManager.TweenRunning or TweenManager.currentTween ~= nil) then
-			pcall(function()
-				L:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-				L:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
-				L:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-				L:ChangeState(Enum.HumanoidStateType.Swimming)
-			end)
-		end
 	else
 		local stillNoclip = (typeof(ToggleNoclip) == "function" and ToggleNoclip())
 			or (Settings and (Settings.Noclip or Settings["Start Farm"] or Settings["Auto Chest"] or Settings["Teleport To Fruit"]))
@@ -2253,25 +2653,18 @@ getgenv().BananaNoclipConn = runService.Stepped:Connect(function()
 					part.CanCollide = false
 				end
 			end
-			-- Enter Swimming state during active tween flight for smooth aerodynamic posture
-			if isTweening then
-				pcall(function()
-					hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-					hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
-					hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-					hum:ChangeState(Enum.HumanoidStateType.Swimming)
-				end)
-			elseif hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-				-- When not actively tweening, restore Running state so jumping and walking work normally!
+			local curState = hum:GetState()
+			if curState == Enum.HumanoidStateType.Swimming or curState == Enum.HumanoidStateType.StrafingNoPhysics then
 				pcall(function()
 					hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 					hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
 					hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-					hum:ChangeState(Enum.HumanoidStateType.Running)
+					hum:ChangeState(Enum.HumanoidStateType.Freefall)
 				end)
 			end
 		else
-			if hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
+			local curState = hum:GetState()
+			if curState == Enum.HumanoidStateType.Swimming or curState == Enum.HumanoidStateType.StrafingNoPhysics then
 				pcall(function()
 					hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 					hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
@@ -2312,8 +2705,16 @@ getgenv().TweenManager = {
 		getgenv().Tween = nil
 		local char = (t and t.Character) or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if hrp and hrp:FindFirstChild("FloatForce") and not (G or ReadyToDodge) then
-			pcall(function() hrp.FloatForce:Destroy() end)
+		local stillHold = (Settings and (Settings["Start Farm"] or Settings.Noclip or Settings["Auto Chest"] or Settings["Teleport To Fruit"]))
+			or getgenv().noclip
+			or G
+			or ReadyToDodge
+		if hrp and hrp:FindFirstChild("FloatForce") then
+			if not stillHold then
+				pcall(function() hrp.FloatForce:Destroy() end)
+			else
+				hrp.FloatForce.Velocity = Vector3.new(0, 0, 0)
+			end
 		end
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum and hum.Health > 0 then
@@ -2321,8 +2722,13 @@ getgenv().TweenManager = {
 				hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
 				hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-				if hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-					hum:ChangeState(Enum.HumanoidStateType.Running)
+				local cur = hum:GetState()
+				if cur == Enum.HumanoidStateType.Swimming or cur == Enum.HumanoidStateType.StrafingNoPhysics then
+					if stillHold then
+						hum:ChangeState(Enum.HumanoidStateType.Freefall)
+					else
+						hum:ChangeState(Enum.HumanoidStateType.Running)
+					end
 				end
 			end)
 		end
@@ -2389,8 +2795,13 @@ getgenv().TweenManager = {
 						S:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 						S:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
 						S:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-						if S:GetState() == Enum.HumanoidStateType.Swimming or S:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-							S:ChangeState(Enum.HumanoidStateType.Running)
+						local cur = S:GetState()
+						if cur == Enum.HumanoidStateType.Swimming or cur == Enum.HumanoidStateType.StrafingNoPhysics then
+							if stillNoclip then
+								S:ChangeState(Enum.HumanoidStateType.Freefall)
+							else
+								S:ChangeState(Enum.HumanoidStateType.Running)
+							end
 						end
 					end)
 				end
@@ -2926,6 +3337,18 @@ local function y(x)
 	force.Velocity = Vector3.new(0, 0, 0)
 	force.MaxForce = Vector3.new(1e9, 1e9, 1e9)
 	force.P = 10000
+	local char = x.Parent
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health > 0 and hum.SeatPart == nil and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+		pcall(function()
+			hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+			hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+			local cur = hum:GetState()
+			if cur == Enum.HumanoidStateType.Swimming or cur == Enum.HumanoidStateType.StrafingNoPhysics or cur == Enum.HumanoidStateType.Running then
+				hum:ChangeState(Enum.HumanoidStateType.Freefall)
+			end
+		end)
+	end
 	return force
 end
 
@@ -2965,7 +3388,7 @@ local function B(Z, C, J, F)
 		pcall(coroutine.close, k.ActiveConnection)
 	end
 
-	local targetSpeed = math.max(tonumber(J) or (Settings and Settings["Speed Tween "]) or 250, 50)
+	local targetSpeed = tonumber(J) or (Settings and Settings["Speed Tween "]) or 190
 	F = tonumber(F) or 2.5
 	k.LastTP = tick()
 	k.LastCF = C
@@ -2994,8 +3417,16 @@ local function B(Z, C, J, F)
 		end
 		local char = (t and t.Character) or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if hrp and hrp:FindFirstChild("FloatForce") and not (G or ReadyToDodge) then
-			pcall(function() hrp.FloatForce:Destroy() end)
+		local stillHold = (Settings and (Settings["Start Farm"] or Settings.Noclip or Settings["Auto Chest"] or Settings["Teleport To Fruit"]))
+			or getgenv().noclip
+			or G
+			or ReadyToDodge
+		if hrp and hrp:FindFirstChild("FloatForce") then
+			if not stillHold then
+				pcall(function() hrp.FloatForce:Destroy() end)
+			else
+				hrp.FloatForce.Velocity = Vector3.new(0, 0, 0)
+			end
 		end
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum and hum.Health > 0 then
@@ -3003,8 +3434,13 @@ local function B(Z, C, J, F)
 				hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
 				hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
 				hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-				if hum:GetState() == Enum.HumanoidStateType.Swimming or hum:GetState() == Enum.HumanoidStateType.StrafingNoPhysics then
-					hum:ChangeState(Enum.HumanoidStateType.Running)
+				local cur = hum:GetState()
+				if cur == Enum.HumanoidStateType.Swimming or cur == Enum.HumanoidStateType.StrafingNoPhysics then
+					if stillHold then
+						hum:ChangeState(Enum.HumanoidStateType.Freefall)
+					else
+						hum:ChangeState(Enum.HumanoidStateType.Running)
+					end
 				end
 			end)
 		end
@@ -3030,6 +3466,9 @@ local function B(Z, C, J, F)
 	D = coroutine.create(function()
 		local startCF = Z.CFrame
 		local goalCF = C
+		if goalCF.Rotation == CFrame.identity and startCF.Rotation ~= CFrame.identity then
+			goalCF = CFrame.new(goalCF.Position) * startCF.Rotation
+		end
 		local totalDistance = (goalCF.Position - startCF.Position).Magnitude
 
 		if totalDistance <= F then
@@ -3044,7 +3483,7 @@ local function B(Z, C, J, F)
 		local distanceTraveled = 0
 		local lastTick = tick()
 
-		-- QuantumOnyx & Banana Hub high-speed DeltaTime Lerp Loop with Aerodynamic Flight Pose
+		-- High-speed DeltaTime Lerp Loop with Upright Hover State (matching in-air mob farming state)
 		while not isCancelled do
 			local charNow = t.Character
 			local humNow = charNow and charNow:FindFirstChildOfClass("Humanoid")
@@ -3052,13 +3491,17 @@ local function B(Z, C, J, F)
 				break
 			end
 
-			-- Continuously maintain Swimming flight animation state during flight
-			if humNow:GetState() ~= Enum.HumanoidStateType.Swimming then
+			-- Maintain upright hover state (matching combat hover pose, no swimming/superman tilt or ground running)
+			local curState = humNow:GetState()
+			if curState == Enum.HumanoidStateType.Swimming
+				or curState == Enum.HumanoidStateType.StrafingNoPhysics
+				or curState == Enum.HumanoidStateType.Running
+				or curState == Enum.HumanoidStateType.Climbing
+			then
 				pcall(function()
-					humNow:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-					humNow:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
-					humNow:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-					humNow:ChangeState(Enum.HumanoidStateType.Swimming)
+					humNow:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+					humNow:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+					humNow:ChangeState(Enum.HumanoidStateType.Freefall)
 				end)
 			end
 
@@ -3074,30 +3517,20 @@ local function B(Z, C, J, F)
 			local currentPos = startCF.Position:Lerp(goalCF.Position, alpha)
 			local moveVec = goalCF.Position - currentPos
 
-			-- Dynamic forward-facing flight orientation (gliding like top Blox Fruits scripts)
-			if totalDistance > 10 and alpha < 0.9 and moveVec.Magnitude > 1 then
-				local lookTarget = currentPos + moveVec
-				local flightCF
-				if math.abs(moveVec.Unit.Y) > 0.95 then
-					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 0, 1))
-				else
-					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 1, 0))
-				end
-				Z.CFrame = flightCF
-			elseif totalDistance > 10 and alpha >= 0.9 and alpha < 1 then
-				local lookTarget = currentPos + moveVec
-				local flightCF
-				if moveVec.Magnitude > 0.1 and math.abs(moveVec.Unit.Y) > 0.95 then
-					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 0, 1))
-				elseif moveVec.Magnitude > 0.1 then
-					flightCF = CFrame.lookAt(currentPos, lookTarget, Vector3.new(0, 1, 0))
-				else
-					flightCF = goalCF
-				end
-				local blend = (alpha - 0.9) / 0.1
-				Z.CFrame = flightCF:Lerp(goalCF, blend)
-			else
+			-- Upright floating stance (identical to hovering above mobs during farm)
+			if goalCF.Rotation ~= CFrame.identity and goalCF.Rotation ~= startCF.Rotation then
 				Z.CFrame = startCF:Lerp(goalCF, alpha)
+			else
+				if moveVec.Magnitude > 0.5 then
+					local flatLook = Vector3.new(moveVec.X, 0, moveVec.Z)
+					if flatLook.Magnitude > 0.1 then
+						Z.CFrame = CFrame.lookAt(currentPos, currentPos + flatLook)
+					else
+						Z.CFrame = CFrame.new(currentPos) * startCF.Rotation
+					end
+				else
+					Z.CFrame = CFrame.new(currentPos) * startCF.Rotation
+				end
 			end
 
 			Z.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -3111,6 +3544,14 @@ local function B(Z, C, J, F)
 				Z.CFrame = goalCF
 				Z.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 				Z.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+				-- Stabilization hold: pin destination across multiple Heartbeats so Roblox server firmly registers arrival and prevents rubberbanding
+				for _ = 1, 6 do
+					x.Heartbeat:Wait()
+					if isCancelled or not Z or not Z.Parent then break end
+					Z.CFrame = goalCF
+					Z.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					Z.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+				end
 				r.PlaybackState = Enum.PlaybackState.Completed
 				break
 			end
@@ -3288,13 +3729,30 @@ function toTarget(P, e)
 			end
 		end
 	end
-	local snapThreshold = e and 8 or 15
+	local snapThreshold = e and 4 or 6
 	if Y < snapThreshold and not G and not ReadyToDodge then
 		TweenManager.CancelTweenOnly()
 		I()
 		H.CFrame = P
+		H.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		H.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		local stillHold = (Settings and (Settings["Start Farm"] or Settings.Noclip or Settings["Auto Chest"] or Settings["Teleport To Fruit"]))
+			or getgenv().noclip
+			or G
+			or ReadyToDodge
 		if H:FindFirstChild("FloatForce") then
-			pcall(function() H.FloatForce:Destroy() end)
+			if not stillHold then
+				task.delay(0.5, function()
+					if H and H.Parent and not (TweenManager and TweenManager.TweenRunning) and not getgenv().noclip then
+						local ff = H:FindFirstChild("FloatForce")
+						if ff then pcall(function() ff:Destroy() end) end
+					end
+				end)
+			else
+				H.FloatForce.Velocity = Vector3.new(0, 0, 0)
+			end
+		elseif stillHold then
+			y(H)
 		end
 		return
 	end
@@ -3399,6 +3857,64 @@ function toTarget(P, e)
 				end
 			end
 		end
+		-- Sea 1 Skylands & Underwater Boundary Transition
+		local isSea1 = (game.PlaceId == 2753915549 or game.PlaceId == 85211729168715 or game.PlaceId == getgenv().CheckPlaceId3)
+		if isSea1 and H and H.Parent then
+			local hPos = H.Position
+			local pPos = P.Position
+			local comm = CommF or (game.ReplicatedStorage:FindFirstChild("Remotes") and game.ReplicatedStorage.Remotes:FindFirstChild("CommF_")) or game.ReplicatedStorage:FindFirstChild("CommF_")
+
+			-- Upper Skylands (Y > 3000) <-> Lower Skylands (Y < 2500)
+			if hPos.Y > 3000 and pPos.Y < 2500 and (pPos - Vector3.new(-7894, 5547, -380)).Magnitude > 1000 then
+				local exitCF = CFrame.new(-7894, 5547, -380)
+				if (hPos - exitCF.Position).Magnitude > 50 then
+					B(H, exitCF, 350, 12)
+					return
+				else
+					if comm then comm:InvokeServer("requestEntrance", Vector3.new(-4607, 874, -1667)) end
+					TweenManager.CancelCurrent()
+					task.wait(0.5)
+					return
+				end
+			elseif hPos.Y < 2500 and pPos.Y > 3000 then
+				local enterCF = CFrame.new(-4607, 874, -1667)
+				if (hPos - enterCF.Position).Magnitude > 50 then
+					B(H, enterCF, 350, 12)
+					return
+				else
+					if comm then comm:InvokeServer("requestEntrance", Vector3.new(-7894, 5547, -380)) end
+					TweenManager.CancelCurrent()
+					task.wait(0.5)
+					return
+				end
+			end
+
+			-- Underwater City (X > 50000) <-> Outside Sea 1 (X < 50000)
+			if hPos.X > 50000 and pPos.X < 50000 then
+				local exitCF = CFrame.new(61163, 11, 1819)
+				if (hPos - exitCF.Position).Magnitude > 50 then
+					B(H, exitCF, 350, 12)
+					return
+				else
+					if comm then comm:InvokeServer("requestEntrance", Vector3.new(4050, -1, -1814)) end
+					TweenManager.CancelCurrent()
+					task.wait(0.5)
+					return
+				end
+			elseif hPos.X < 50000 and pPos.X > 50000 then
+				local enterCF = CFrame.new(4050, -1, -1814)
+				if (hPos - enterCF.Position).Magnitude > 50 then
+					B(H, enterCF, 350, 12)
+					return
+				else
+					if comm then comm:InvokeServer("requestEntrance", Vector3.new(61163, 11, 1819)) end
+					TweenManager.CancelCurrent()
+					task.wait(0.5)
+					return
+				end
+			end
+		end
+
 		local l, d, _
 		if Y >= 2500 and Q and next(Q) then
 			for o, y in pairs(Q) do
@@ -3525,12 +4041,29 @@ function toTarget(P, e)
 	elseif G then
 		offsetCF = (CFrame.new(0, Settings["Distance Teleport Y"] or 800, 0))
 	end
-	local targetSpeed, targetGoal = Settings["Speed Tween "] or 180, P * offsetCF
+	local targetSpeed, targetGoal = tonumber(Settings["Speed Tween "]) or 190, P * offsetCF
 	if (targetGoal.Position - H.Position).Magnitude < 3 and not ReadyToDodge and not G then
 		TweenManager.CancelTweenOnly()
 		H.CFrame = targetGoal
+		H.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		H.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		local stillHold = (Settings and (Settings["Start Farm"] or Settings.Noclip or Settings["Auto Chest"] or Settings["Teleport To Fruit"]))
+			or getgenv().noclip
+			or G
+			or ReadyToDodge
 		if H:FindFirstChild("FloatForce") then
-			pcall(function() H.FloatForce:Destroy() end)
+			if not stillHold then
+				task.delay(0.5, function()
+					if H and H.Parent and not (TweenManager and TweenManager.TweenRunning) and not getgenv().noclip then
+						local ff = H:FindFirstChild("FloatForce")
+						if ff then pcall(function() ff:Destroy() end) end
+					end
+				end)
+			else
+				H.FloatForce.Velocity = Vector3.new(0, 0, 0)
+			end
+		elseif stillHold then
+			y(H)
 		end
 		return
 	end
@@ -3553,16 +4086,16 @@ spawn(function()
 			end
 			if g["Teleport To Npc"] then
 				for E, E in next, m, nil do
-					if E.Name == g["Select Npc"] then
-						toTarget(E.HumanoidRootPart.CFrame)
+					if E.Name == g["Select Npc"] and E:FindFirstChild("HumanoidRootPart") then
+						toTarget(E.HumanoidRootPart.CFrame * CFrame.new(0, 15, 0))
 					end
 				end
 			end
 			if g["Teleport Mirage"] then
 				if game:GetService("Workspace").Map:FindFirstChild("MysticIsland") then
 					local m = DetectNpc("Advanced Fruit Dealer")
-					if m then
-						toTarget(m.HumanoidRootPart.CFrame)
+					if m and m:FindFirstChild("HumanoidRootPart") then
+						toTarget(m.HumanoidRootPart.CFrame * CFrame.new(0, 15, 0))
 						return
 					end
 				end
@@ -3570,8 +4103,8 @@ spawn(function()
 			if g["Teleport Prehistoric Island"] then
 				if game:GetService("Workspace").Map:FindFirstChild("PrehistoricIsland") then
 					local g = DetectNpc("Fossil Expert")
-					if g then
-						toTarget(g.HumanoidRootPart.CFrame)
+					if g and g:FindFirstChild("HumanoidRootPart") then
+						toTarget(g.HumanoidRootPart.CFrame * CFrame.new(0, 15, 0))
 						return
 					end
 				end
@@ -4642,7 +5175,7 @@ SettingFarmMainSection.CreateToggle(
 	end
 )
 SettingFarmMainSection.CreateSlider(
-	{ Title = "Speed Tween ", Min = 0, Max = 1000, Default = Settings["Speed Tween "] or 180, Precise = true },
+	{ Title = "Speed Tween ", Min = 0, Max = 1000, Default = Settings["Speed Tween "] or 190, Precise = true },
 	function(I)
 		SaveSettings("Speed Tween ", I)
 	end
@@ -4836,10 +5369,10 @@ local LevelQuestMapping = {
 	{ Min = 325, Max = 374, Quest = "MagmaQuest", Id = 2, Mob = "Military Spy", PosQ = CFrame.new(-5313.37012, 10.9500084, 8515.29395), PosM = CFrame.new(-5802.8681640625, 86.262413024902, 8828.859375) },
 	{ Min = 375, Max = 399, Quest = "FishmanQuest", Id = 1, Mob = "Fishman Warrior", PosQ = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734), PosM = CFrame.new(60878.30078125, 18.482830047607, 1543.7574462891) },
 	{ Min = 400, Max = 449, Quest = "FishmanQuest", Id = 2, Mob = "Fishman Commando", PosQ = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734), PosM = CFrame.new(61922.6328125, 18.482830047607, 1493.9343261719) },
-	{ Min = 450, Max = 474, Quest = "SkyExp1Quest", Id = 1, Mob = "God's Guard", PosQ = CFrame.new(-4721.88867, 843.874695, -1949.96643), PosM = CFrame.new(-4710.04296875, 845.27697753906, -1927.3079833984) },
-	{ Min = 475, Max = 524, Quest = "SkyExp1Quest", Id = 2, Mob = "Shanda", PosQ = CFrame.new(-4721.88867, 843.874695, -1949.96643), PosM = CFrame.new(-7678.4897460938, 5566.4038085938, -497.21560668945) },
-	{ Min = 525, Max = 549, Quest = "SkyExp2Quest", Id = 1, Mob = "Royal Squad", PosQ = CFrame.new(-7906.81592, 5634.6626, -1411.99194), PosM = CFrame.new(-7624.2524414062, 5658.1333007812, -1467.3542480469) },
-	{ Min = 550, Max = 624, Quest = "SkyExp2Quest", Id = 2, Mob = "Royal Soldier", PosQ = CFrame.new(-7906.81592, 5634.6626, -1411.99194), PosM = CFrame.new(-7836.7534179688, 5645.6640625, -1790.6236572266) },
+	{ Min = 450, Max = 474, Quest = "SkyExp1Quest", Id = 1, Mob = "God's Guard", PosQ = CFrame.new(-4721.88867, 843.874695, -1949.96643), PosM = CFrame.new(-4234.55, 1089.33, -267.37) },
+	{ Min = 475, Max = 524, Quest = "SkyExp1Quest", Id = 2, Mob = "Shanda", PosQ = CFrame.new(-5949.0673828125, 5467.93994140625, 2086.51513671875), PosM = CFrame.new(-5950.41, 5470.0, 1800.0) },
+	{ Min = 525, Max = 549, Quest = "SkyExp2Quest", Id = 1, Mob = "Royal Squad", PosQ = CFrame.new(-7033.1005859375, 5590.57421875, 1353.10693359375), PosM = CFrame.new(-6800.0, 5552.0, 1220.0) },
+	{ Min = 550, Max = 624, Quest = "SkyExp2Quest", Id = 2, Mob = "Royal Soldier", PosQ = CFrame.new(-7033.1005859375, 5590.57421875, 1353.10693359375), PosM = CFrame.new(-7050.0, 5542.0, 930.0) },
 	{ Min = 625, Max = 649, Quest = "FountainQuest", Id = 1, Mob = "Galley Pirate", PosQ = CFrame.new(5259.81982, 37.3500175, 4050.0293), PosM = CFrame.new(5551.0219726562, 78.901351928711, 3930.4128417969) },
 	{ Min = 650, Max = 699, Quest = "FountainQuest", Id = 2, Mob = "Galley Captain", PosQ = CFrame.new(5259.81982, 37.3500175, 4050.0293), PosM = CFrame.new(5441.9516601562, 42.502059936523, 4950.09375) },
 	{ Min = 700, Max = 724, Quest = "Area1Quest", Id = 1, Mob = "Raider", PosQ = CFrame.new(-429.543518, 71.7699966, 1836.18188), PosM = CFrame.new(-728.32672119141, 52.779319763184, 2345.7705078125) },
@@ -5183,7 +5716,7 @@ function CFrameQuest()
 	getgenv().questpoint.MagmaQuest = CFrame.new(-5313.37012, 10.9500084, 8515.29395)
 	getgenv().questpoint.FishmanQuest = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734)
 	getgenv().questpoint.SkyExp1Quest = CFrame.new(-4721.88867, 843.874695, -1949.96643)
-	getgenv().questpoint.SkyExp2Quest = CFrame.new(-7906.81592, 5634.6626, -1411.99194)
+	getgenv().questpoint.SkyExp2Quest = CFrame.new(-7033.1005859375, 5590.57421875, 1353.10693359375)
 	getgenv().questpoint.FountainQuest = CFrame.new(5259.81982, 37.3500175, 4050.0293)
 	getgenv().questpoint.Area1Quest = CFrame.new(-429.543518, 71.7699966, 1836.18188)
 	getgenv().questpoint.Area2Quest = CFrame.new(638.43811, 71.769989, 918.282898)
@@ -5300,39 +5833,41 @@ TakeQuestLevel = function()
 		return
 	end
 
-	-- Dynamically detect quest giver NPC in workspace.NPCs if present
-	local npcCF = nil
-	local npcsFolder = workspace:FindFirstChild("NPCs")
-	if npcsFolder then
-		for _, npc in ipairs(npcsFolder:GetChildren()) do
-			if npc:FindFirstChild("HumanoidRootPart") then
-				local nName = npc.Name:lower()
-				if (V.QuestName and nName:find(V.QuestName:lower()))
-					or (V.Name and nName:find(V.Name:lower()))
-					or (V.QuestName == "SkyExp1Quest" and (nName:find("sky quest giver") or nName:find("mole")))
-				then
-					npcCF = npc.HumanoidRootPart.CFrame
+	-- Dynamically detect quest giver NPC from GuideModule.Data.NPCList first (100% official game data)
+	local questCF = nil
+	pcall(function()
+		local guideModule = require(game:GetService("ReplicatedStorage"):WaitForChild("GuideModule"))
+		if guideModule and guideModule.Data and guideModule.Data.NPCList then
+			for _, npcData in pairs(guideModule.Data.NPCList) do
+				if npcData.InternalQuestName == V.QuestName and npcData.Position then
+					questCF = CFrame.new(npcData.Position)
 					break
 				end
 			end
 		end
+	end)
+
+	if not questCF then
+		local basePos = V.Pos and ((typeof(V.Pos) == "CFrame" and V.Pos) or CFrame.new(V.Pos))
+		questCF = basePos
 	end
 
-	local questCF = npcCF or ((typeof(V.Pos) == "CFrame" and V.Pos) or CFrame.new(V.Pos))
 	local H = questCF.Position
 	local B = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
 	local C = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
 	if not B or not C then
 		return
 	end
-	if (H - B.Position).Magnitude <= 25 and C.Health > 0 then
+	if (H - B.Position).Magnitude <= 35 and C.Health > 0 then
 		local comm = CommF or (game.ReplicatedStorage:FindFirstChild("Remotes") and game.ReplicatedStorage.Remotes:FindFirstChild("CommF_")) or game.ReplicatedStorage:FindFirstChild("CommF_")
 		if comm and V.QuestName and V.Id then
-			comm:InvokeServer("StartQuest", tostring(V.QuestName), V.Id)
+			local res = comm:InvokeServer("StartQuest", tostring(V.QuestName), V.Id)
+			if res == 0 or res == false then
+				task.wait(0.2)
+			end
 		end
-		task.wait(0.5)
 	else
-		toTarget(questCF * CFrame.new(0, 4, 2), true)
+		toTarget(questCF * CFrame.new(0, 18, 0), true)
 	end
 end
 
@@ -5966,13 +6501,12 @@ function FarmMethod()
 						table.insert(N, Y)
 						repeat
 							task.wait()
-							toTarget(H.CFrame * CFrame.new(0, 60, 0))
+							toTarget(H.CFrame * CFrame.new(0, 20, 0))
 							local hrp = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
-						until not hrp or not H or not H.Parent or (H.Position - hrp.Position).Magnitude <= 100
+						until not hrp or not H or not H.Parent or (H.Position - hrp.Position).Magnitude <= 15
 							or (DetectMob(f))
 							or not Settings["Start Farm"]
 							or not StackFarm
-						wait(1)
 					end
 				end
 			else
@@ -5981,26 +6515,25 @@ function FarmMethod()
 					Instance.new("IntValue", Y).Name = "Ignored"
 					repeat
 						task.wait()
-						toTarget(Y.CFrame * CFrame.new(0, 60, 0))
+						toTarget(Y.CFrame * CFrame.new(0, 20, 0))
 						local hrp = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
-					until not hrp or not Y or not Y.Parent or (Y.Position - hrp.Position).Magnitude <= 100
+					until not hrp or not Y or not Y.Parent or (Y.Position - hrp.Position).Magnitude <= 15
 						or (DetectMob(f))
 						or not Settings["Start Farm"]
 						or not StackFarm
-					wait(1)
 				else
+					DeleteIgnoredMobSpawn()
 					local qInfo = GetQuestForLevel(GetPlayerLevel())
 					local targetPos = (qInfo and qInfo.PosM) or (f == "Desert Bandit" and CFrame.new(924.7998046875, 6.4486746788025, 4481.5859375)) or (f == "Desert Officer" and CFrame.new(1608.2822265625, 8.6142244338989, 4371.0073242188))
 					if targetPos then
 						repeat
 							task.wait()
-							toTarget(targetPos * CFrame.new(0, 60, 0))
+							toTarget(targetPos * CFrame.new(0, 20, 0))
 							local hrp = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
-						until not hrp or (targetPos.Position - hrp.Position).Magnitude <= 100
+						until not hrp or (targetPos.Position - hrp.Position).Magnitude <= 15
 							or (DetectMob(f))
 							or not Settings["Start Farm"]
 							or not StackFarm
-						task.wait(1)
 						DeleteIgnoredMobSpawn()
 					else
 						DeleteIgnoredMobSpawn()
@@ -7247,13 +7780,13 @@ task.spawn(function()
 							end
 							handle.CFrame = hrp.CFrame
 						end)
-						if (handle.Position - hrp.Position).Magnitude <= 10 then
+						if (handle.Position - hrp.Position).Magnitude <= 15 then
 							getgenv().noclip = false
 							game:GetService("VirtualInputManager"):SendKeyEvent(true, "Space", false, game)
 							task.wait(0.05)
 							game:GetService("VirtualInputManager"):SendKeyEvent(false, "Space", false, game)
 						else
-							toTarget(handle.CFrame, true)
+							toTarget(handle.CFrame * CFrame.new(0, 15, 0), true)
 						end
 					end
 					return
@@ -8054,11 +8587,10 @@ function AutoQuestDojo()
 					Instance.new("IntValue", Y).Name = "Ignored"
 					repeat
 						task.wait()
-						toTarget(Y.CFrame * CFrame.new(0, 60, 0))
-					until (t.Character and t.Character:FindFirstChild("HumanoidRootPart") and (Y.Position - t.Character.HumanoidRootPart.Position).Magnitude <= 100)
+						toTarget(Y.CFrame * CFrame.new(0, 20, 0))
+					until (t.Character and t.Character:FindFirstChild("HumanoidRootPart") and (Y.Position - t.Character.HumanoidRootPart.Position).Magnitude <= 15)
 						or (DetectMob(y))
 						or not Settings["Auto Quest Dojo Trainer"]
-					wait(1)
 				else
 					DeleteIgnoredMobSpawn()
 				end
@@ -18239,6 +18771,29 @@ SettingsVolcanoSection.CreateDropdown(
 		SaveSettings("Select Method Kill Golem", g)
 	end
 )
+SettingsVolcanoSection.CreateToggle(
+	{ Title = "Remove Lava Damage (Immunity)", Desc = "Disables CanTouch and collision on all Lava parts across Volcano and Raids", Default = Settings["Remove Lava"] or false },
+	function(v)
+		SaveSettings("Remove Lava", v)
+		if v then
+			task.spawn(function()
+				while Settings["Remove Lava"] and task.wait(1) do
+					pcall(function()
+						for _, obj in ipairs(workspace:GetDescendants()) do
+							if obj:IsA("BasePart") then
+								local n = obj.Name:lower()
+								if n == "lava" or n:find("lavafloor") or n:find("lavapart") or obj.Material == Enum.Material.CrackedLava then
+									obj.CanTouch = false
+									obj.CanCollide = false
+								end
+							end
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
 FarmingVolcanoSection = VolcanoTab.CreateSection("Farming Volcano")
 function AutoCraftinMagnetVol()
 	if not CheckItemInventory("Volcanic Magnet") then
@@ -20396,8 +20951,12 @@ if not getgenv().BananaCatMainLoop then
 				end
 			end
 			local T = t.Character:FindFirstChild("HumanoidRootPart")
+			local stillHold = (Settings and (Settings["Start Farm"] or Settings.Noclip or Settings["Auto Chest"] or Settings["Teleport To Fruit"]))
+				or getgenv().noclip
+				or G
+				or ReadyToDodge
 			if T and (T:FindFirstChild("FloatForce")) and not TweenManager.currentTween then
-				if not ToggleNoclip() or tick() - k.LastCall > 2 then
+				if not stillHold and (not ToggleNoclip() or tick() - k.LastCall > 2) then
 					TweenManager.CancelCurrent()
 				end
 			end
