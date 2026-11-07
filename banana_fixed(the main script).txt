@@ -66,6 +66,10 @@ if not Settings["Select Weapon"] or Settings["Select Weapon"] == "" then
 	Settings["Select Weapon"] = "Melee"
 	SaveSettings("Select Weapon", "Melee")
 end
+if Settings["Fast Attack"] == nil then
+	Settings["Fast Attack"] = true
+	SaveSettings("Fast Attack", true)
+end
 getgenv().Settings = Settings
 function PrepareMultiSelectList(b, t, A)
 	local a = {}
@@ -258,8 +262,8 @@ local function GetAvailableHalloweenDoors()
 
 	for _, obj in ipairs(workspace:GetDescendants()) do
 		if obj.Name == "HalloweenDoor" and obj:IsA("Model") then
-			local prox = obj:FindFirstChild("Proximity")
-			local doorPos = prox and prox.Position or obj:GetPivot().Position
+			local prox = obj:FindFirstChild("Proximity") or obj:FindFirstChildWhichIsA("BasePart") or obj.PrimaryPart
+			local doorPos = (prox and prox.Position) or (obj:IsA("Model") and obj:GetPivot().Position) or Vector3.zero
 			local cooldown = obj:GetAttribute("CooldownUntil")
 
 			-- Check if door is off cooldown
@@ -351,29 +355,192 @@ end
 -----------------------------------------------------------------------------
 -- SECTION 1: TRICK OR TREAT (DOORS)
 -----------------------------------------------------------------------------
+-- Helper: Safe Multi-Method UI Clicker
+local function ClickDialogueButton(btn)
+	if not btn then return false end
+	local clicked = false
+	pcall(function()
+		if typeof(firesignal) == "function" then
+			if btn.MouseButton1Click then firesignal(btn.MouseButton1Click) clicked = true end
+			if btn.Activated then firesignal(btn.Activated) clicked = true end
+		end
+		if typeof(btn.Activate) == "function" then
+			btn:Activate()
+			clicked = true
+		end
+		local vim = game:GetService("VirtualInputManager")
+		if vim and btn:IsA("GuiObject") and btn.AbsolutePosition and btn.AbsoluteSize then
+			local center = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+			vim:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+			task.wait(0.02)
+			vim:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+			clicked = true
+		end
+	end)
+	return clicked
+end
+
+-- Helper: Retrieve active Dialogue frame from PlayerGui
+local function GetActiveDialogue()
+	local lp = game.Players.LocalPlayer or t
+	local pgui = lp and lp:FindFirstChild("PlayerGui")
+	if not pgui then return nil end
+
+	local mainGui = pgui:FindFirstChild("Main") or pgui:FindFirstChild("Main (minimal)")
+	if mainGui then
+		local d = mainGui:FindFirstChild("Dialogue") or mainGui:FindFirstChild("Dialog")
+		if d and d.Visible then return d end
+	end
+
+	for _, gui in ipairs(pgui:GetChildren()) do
+		if gui:IsA("ScreenGui") and gui.Enabled then
+			local d = gui:FindFirstChild("Dialogue") or gui:FindFirstChild("Dialog") or gui:FindFirstChild("NPCDialog")
+			if d and d.Visible then return d end
+		end
+	end
+
+	local fallback = pgui:FindFirstChild("Dialogue", true)
+	if fallback and fallback.Visible then return fallback end
+
+	return nil
+end
+
 HalloweenTrickSection.CreateToggle(
-	{ Title = "Auto Trick or Treat", Desc = "Knocks on Halloween doors across towns to collect up to 500 Candy per door", Default = Settings["Auto Trick or Treat"] or false },
+	{ Title = "Auto Trick or Treat", Desc = "Knocks on Halloween doors, handles Trick or Treat dialogue, and collects Candy Corn", Default = Settings["Auto Trick or Treat"] or false },
 	function(v)
 		SaveSettings("Auto Trick or Treat", v)
 		if v then
 			task.spawn(function()
-				while Settings["Auto Trick or Treat"] and task.wait(0.5) do
+				while Settings["Auto Trick or Treat"] and task.wait(0.3) do
 					pcall(function()
 						local doors = GetAvailableHalloweenDoors()
 						if #doors > 0 then
 							local target = doors[1]
 							StackFarm = false
 							StackFarmOther = false
-							toTarget(CFrame.new(target.pos) * CFrame.new(0, 3, 0))
-							task.wait(0.3)
-							if HalloweenRemotes.Function then
-								HalloweenRemotes.Function:InvokeServer(target.model)
+
+							-- 1. Travel to door and WAIT until arrived (within 14 studs)
+							local moveStart = tick()
+							local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
+							local hrp = char and char:FindFirstChild("HumanoidRootPart")
+							while Settings["Auto Trick or Treat"] and hrp and (hrp.Position - target.pos).Magnitude > 14 and (tick() - moveStart < 9) do
+								toTarget(CFrame.new(target.pos) * CFrame.new(0, 2, 0))
+								task.wait(0.1)
+								char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
+								hrp = char and char:FindFirstChild("HumanoidRootPart")
 							end
-							local prox = target.model:FindFirstChild("Proximity") and target.model.Proximity:FindFirstChildOfClass("ProximityPrompt")
-							if prox and fireproximityprompt then
-								pcall(fireproximityprompt, prox)
+
+							if not Settings["Auto Trick or Treat"] then return end
+
+							-- Position directly in front of the door
+							toTarget(CFrame.new(target.pos) * CFrame.new(0, 2, 0))
+							task.wait(0.15)
+
+							-- 2. Trigger Door interaction (ProximityPrompt & Remotes)
+							local function TriggerDoorPrompt()
+								local prompt = target.model:FindFirstChildWhichIsA("ProximityPrompt", true)
+								if prompt and fireproximityprompt then
+									pcall(fireproximityprompt, prompt, 0)
+									task.wait(0.05)
+									pcall(fireproximityprompt, prompt, 1)
+								end
+								if HalloweenRemotes.Function then
+									pcall(function()
+										HalloweenRemotes.Function:InvokeServer(target.model)
+									end)
+								end
+								if HalloweenRemotes.Event then
+									pcall(function()
+										HalloweenRemotes.Event:FireServer("TrickOrTreat", target.model)
+									end)
+								end
+								if CommF then
+									pcall(function()
+										CommF:InvokeServer("HalloweenDoor", target.model)
+									end)
+								end
 							end
-							task.wait(1.2)
+
+							TriggerDoorPrompt()
+
+							-- 3. Actively handle Dialogue interaction until finished
+							local interactStart = tick()
+							local sawDialogue = false
+							local lastPromptTrigger = tick()
+
+							while Settings["Auto Trick or Treat"] and (tick() - interactStart < 5.5) do
+								task.wait(0.12)
+
+								-- Check if door entered cooldown (indicates server acknowledged and gave candy)
+								local cd = target.model:GetAttribute("CooldownUntil")
+								local sTime = workspace:GetServerTimeNow()
+								if typeof(cd) == "number" and cd > sTime then
+									break
+								end
+
+								local dialogue = GetActiveDialogue()
+								if dialogue and dialogue.Visible then
+									sawDialogue = true
+									local optionClicked = false
+
+									-- Priority 1: Check Option1, Option2, Option3 buttons
+									for _, optName in ipairs({"Option1", "Option2", "Option3"}) do
+										local opt = dialogue:FindFirstChild(optName, true)
+										if opt and opt.Visible then
+											ClickDialogueButton(opt)
+											optionClicked = true
+											break
+										end
+									end
+
+									-- Priority 2: Check any visible TextButton / ImageButton inside dialogue
+									if not optionClicked then
+										for _, btn in ipairs(dialogue:GetDescendants()) do
+											if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and btn.Visible and btn.Active then
+												ClickDialogueButton(btn)
+												optionClicked = true
+												break
+											end
+										end
+									end
+
+									-- Priority 3: Click dialogue frame directly to skip typewriter text
+									if not optionClicked then
+										ClickDialogueButton(dialogue)
+									end
+								else
+									-- Dialogue finished and closed
+									if sawDialogue then
+										task.wait(0.3)
+										break
+									end
+
+									-- If dialogue hasn't appeared yet, re-trigger prompt after 1.2s
+									if tick() - lastPromptTrigger > 1.2 then
+										TriggerDoorPrompt()
+										lastPromptTrigger = tick()
+									end
+								end
+							end
+
+							-- 4. Sweep any Candy Corn or chests dropped immediately around the door
+							pcall(function()
+								local spills = GetCandySpillPieces()
+								for _, piece in ipairs(spills) do
+									if piece.dist <= 35 and piece.obj and piece.obj.Parent then
+										toTarget(CFrame.new(piece.pos))
+										if HalloweenRemotes.Event then
+											local pieceId = tonumber(piece.obj.Name:match("Candy_(%d+)")) or tonumber(piece.obj.Name:match("Chest_.*_(%d+)"))
+											if pieceId then
+												HalloweenRemotes.Event:FireServer("CandySpillClaim", pieceId)
+											end
+										end
+										task.wait(0.08)
+									end
+								end
+							end)
+
+							task.wait(0.2)
 						elseif Settings["Hop Server When No Doors"] then
 							HopServer()
 							task.wait(5)
@@ -4480,6 +4647,43 @@ getgenv().ClickM1Volcano = function(E, l)
 	end
 	AttackFunction(l and 80 or 30)
 end
+
+-- Standalone Persistent Fast Attack Runner (Operates 100% independently of Auto Farm switches)
+task.spawn(function()
+	while true do
+		task.wait(0.06)
+		if Settings and Settings["Fast Attack"] ~= false then
+			pcall(function()
+				local char = t.Character
+				if not char then return end
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				if not hrp or not hum or hum.Health <= 0 then return end
+				local stun = char:FindFirstChild("Stun")
+				if stun and stun.Value ~= 0 then return end
+
+				local tool = char:FindFirstChildOfClass("Tool")
+				if tool then
+					local toolTip = tool.ToolTip
+					if toolTip == "Blox Fruit" or (Settings and Settings["Select Weapon"] == "Blox Fruit") then
+						local targets = AttackAOE(80, true)
+						if targets and #targets > 0 then
+							if not (getgenv().UseFruitM1 and getgenv().UseFruitM1(targets[1][1])) then
+								AttackFunction(80)
+							end
+						end
+					else
+						local targets = AttackAOE(70, false)
+						if targets and #targets > 0 then
+							AttackFunction(70)
+						end
+					end
+				end
+			end)
+		end
+	end
+end)
+
 local m = L:WaitForChild("Modules")
 getgenv().SpamGunDragonStorm = function(E)
 	local l, Q = require(m.CombatUtil), t.Character
@@ -4900,6 +5104,12 @@ local Q, d =
 			SaveSettings("Select Weapon", I)
 		end
 	)
+SettingFarmMainSection.CreateToggle(
+	{ Title = "Fast Attack", Desc = "Keep Fast Attack active always while holding a weapon", Default = Settings["Fast Attack"] ~= false },
+	function(I)
+		SaveSettings("Fast Attack", I)
+	end
+)
 SettingFarmMainSection.CreateToggle(
 	{ Title = "Attack No Animation ", Desc = nil, Default = Settings["Attack No Animation "] or true },
 	function(I)
