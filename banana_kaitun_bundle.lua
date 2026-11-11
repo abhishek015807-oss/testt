@@ -137,6 +137,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
 local CollectionService = game:GetService("CollectionService")
 local LocalPlayer = Players.LocalPlayer
 
@@ -1418,26 +1419,284 @@ function Race.Step()
 end
 
 -- ====================================================================
--- 11. SECRET ENDGAME QUESTS ENGINE (CDK, YAMA, TUSHITA, SOUL GUITAR)
+-- 11. COMPLETE ENDGAME QUESTS & RARE ITEMS ENGINE
+-- Features: Valkyrie Helm, Mirror Fractal, CDK, Saber, Godhuman,
+-- Soul Guitar, Pull Lever, Rengoku, Dragon Trident, Pole, Gravity Blade,
+-- Shark Anchor, Auto Haki Buyer, and Intelligent Server Hopping.
 -- ====================================================================
+
 local SecretQuests = {
+    AutoSaber = true,
+    AutoValkyrie = true,
+    AutoMirrorFractal = true,
     AutoYama = true,
     AutoTushita = true,
     AutoCDK = true,
     AutoSoulGuitar = true,
+    AutoGodhuman = true,
+    AutoPullLever = true,
+    AutoSharkAnchor = true,
+    AutoRengoku = false,
+    AutoDragonTrident = false,
+    AutoPole = false,
+    AutoGravityBlade = false,
 }
 
 if GH["Get Items"] then
-    if GH["Get Items"]["Cursed Dual Katana"] ~= nil then
-        SecretQuests.AutoCDK = GH["Get Items"]["Cursed Dual Katana"]
-        SecretQuests.AutoYama = GH["Get Items"]["Cursed Dual Katana"]
-        SecretQuests.AutoTushita = GH["Get Items"]["Cursed Dual Katana"]
-    end
-    if GH["Get Items"]["Skull Guitar"] ~= nil or GH["Get Items"]["Soul Guitar"] ~= nil then
-        SecretQuests.AutoSoulGuitar = GH["Get Items"]["Skull Guitar"] or GH["Get Items"]["Soul Guitar"]
-    end
+    SecretQuests.AutoSaber = GH["Get Items"]["Saber"] ~= false
+    SecretQuests.AutoGodhuman = GH["Get Items"]["Godhuman"] ~= false
+    SecretQuests.AutoSoulGuitar = (GH["Get Items"]["Skull Guitar"] or GH["Get Items"]["Soul Guitar"]) ~= false
+    SecretQuests.AutoMirrorFractal = GH["Get Items"]["Mirror Fractal"] ~= false
+    SecretQuests.AutoCDK = GH["Get Items"]["Cursed Dual Katana"] ~= false
+    SecretQuests.AutoYama = GH["Get Items"]["Cursed Dual Katana"] ~= false
+    SecretQuests.AutoTushita = GH["Get Items"]["Cursed Dual Katana"] ~= false
+    SecretQuests.AutoPullLever = GH["Get Items"]["Auto Pull Lever"] ~= false
+    SecretQuests.AutoSharkAnchor = GH["Get Items"]["Shark Anchor"] ~= false
 end
 
+if GH["Get Rare Items"] then
+    SecretQuests.AutoRengoku = GH["Get Rare Items"]["Rengoku"] == true
+    SecretQuests.AutoDragonTrident = GH["Get Rare Items"]["Dragon Trident"] == true
+    SecretQuests.AutoPole = GH["Get Rare Items"]["Pole (1st Form)"] == true
+    SecretQuests.AutoGravityBlade = GH["Get Rare Items"]["Gravity Blade"] == true
+end
+
+-- ====================================================================
+-- INTELLIGENT SERVER HOPPER
+-- ====================================================================
+local VisitedServers = {}
+local function HopServer(reason)
+    HUDStatus = "Hopping Server: " .. tostring(reason or "Seeking Target")
+    pcall(function()
+        local placeId = game.PlaceId
+        local serversUrl = string.format("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100", tostring(placeId))
+        local response = game:HttpGet(serversUrl)
+        local body = HttpService:JSONDecode(response)
+        if body and body.data then
+            for _, s in ipairs(body.data) do
+                if s.playing and s.playing < s.maxPlayers - 1 and s.id ~= game.JobId and not VisitedServers[s.id] then
+                    VisitedServers[s.id] = true
+                    game:GetService("TeleportService"):TeleportToPlaceInstance(placeId, s.id, LocalPlayer)
+                    task.wait(5)
+                    return
+                end
+            end
+        end
+        game:GetService("TeleportService"):Teleport(placeId, LocalPlayer)
+    end)
+end
+
+-- ====================================================================
+-- AUTO BUY HAKI (BUSO, GEPPO, SORU, KEN)
+-- ====================================================================
+local function AutoBuyHaki()
+    if not CommF or not GH["Buy Haki"] then return end
+    pcall(function()
+        local d = LocalPlayer:FindFirstChild("Data")
+        local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
+        local sea = Data.GetSea()
+
+        if GH["Buy Haki"]["Enhancement"] and not HasItem("Buso") and beli >= 25000 then
+            CommF:InvokeServer("BuyHaki", "Buso")
+        end
+        if GH["Buy Haki"]["Skyjump"] and not HasItem("Geppo") and beli >= 10000 then
+            CommF:InvokeServer("BuyHaki", "Geppo")
+        end
+        if GH["Buy Haki"]["Flash Step"] and not HasItem("Soru") and beli >= 100000 then
+            CommF:InvokeServer("BuyHaki", "Soru")
+        end
+        if GH["Buy Haki"]["Observation"] and not HasItem("Observation") and beli >= 750000 and sea == 1 then
+            local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+            if lvl >= 300 then
+                CommF:InvokeServer("KenTalk", "Buy")
+            end
+        end
+    end)
+end
+
+-- ====================================================================
+-- 1. AUTO SABER QUEST (SEA 1 - FULL PUZZLE & SABER EXPERT)
+-- ====================================================================
+function SecretQuests.DoSaber()
+    if not SecretQuests.AutoSaber or not CommF or Data.GetSea() ~= 1 or HasItem("Saber") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 200 then return false end
+
+    -- Check if Saber Expert is alive
+    local saberExpert = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Saber Expert")
+    if saberExpert and IsMobAlive(saberExpert) then
+        local mRoot = saberExpert:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            HUDStatus = "Boss: Defeating Saber Expert [Unlocking Saber] ⚔️"
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(saberExpert)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    -- Step 1: Jungle Plates (5 Buttons)
+    local plates = {
+        CFrame.new(-1612.56, 36.98, 148.72),
+        CFrame.new(-1480.95, 23.51, 38.64),
+        CFrame.new(-1390.87, 23.51, -112.58),
+        CFrame.new(-1497.63, 23.51, -215.45),
+        CFrame.new(-1645.24, 23.51, -195.42)
+    }
+    for _, plateCF in ipairs(plates) do
+        toTarget(plateCF, 3)
+        task.wait(0.2)
+    end
+
+    -- Step 2: Grab Torch & Burn Desert Door
+    if not HasItem("Torch") and not HasItem("Cup") and not HasItem("Relic") then
+        local torchHole = CFrame.new(-1610.01, 11.50, 164.00)
+        toTarget(torchHole, 5)
+        task.wait(0.5)
+    end
+
+    if HasItem("Torch") then
+        local desertHouse = CFrame.new(1114.61, 5.05, 4350.23)
+        toTarget(desertHouse, 5)
+        EquipWeapon()
+        task.wait(0.5)
+    end
+
+    -- Step 3: Fill Cup at Frozen Village & Help Sick Man
+    if HasItem("Cup") then
+        local icicleCave = CFrame.new(1398.54, 37.35, -1320.12)
+        toTarget(icicleCave, 5)
+        pcall(function() CommF:InvokeServer("ProQuestProgress", "FillCup", LocalPlayer.Character.Cup) end)
+        task.wait(0.5)
+        local sickMan = CFrame.new(1390.95, 37.35, -1350.50)
+        toTarget(sickMan, 5)
+        pcall(function() CommF:InvokeServer("ProQuestProgress", "SickMan") end)
+        task.wait(0.5)
+    end
+
+    -- Step 4: Mob Leader & Relic
+    local richSonProgress = CommF:InvokeServer("ProQuestProgress", "RichSon")
+    if richSonProgress == 0 then
+        local mobLeader = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Mob Leader")
+        if mobLeader and IsMobAlive(mobLeader) then
+            local mRoot = mobLeader:FindFirstChild("HumanoidRootPart")
+            if mRoot then
+                HUDStatus = "Boss: Defeating Mob Leader [Saber Quest] ⚔️"
+                toTarget(GetFarmCFrame(mRoot), 5)
+                BringMob(mobLeader)
+                EquipWeapon()
+                return true
+            end
+        else
+            toTarget(CFrame.new(-2967.60, -4.91, 5328.71), 5)
+            return true
+        end
+    elseif richSonProgress == 1 then
+        pcall(function() CommF:InvokeServer("ProQuestProgress", "RichSon") end)
+        task.wait(0.5)
+    end
+
+    -- Step 5: Insert Relic into Jungle Altar
+    if HasItem("Relic") then
+        local jungleAltar = CFrame.new(-1404.92, 29.98, 3.81)
+        toTarget(jungleAltar, 5)
+        pcall(function() CommF:InvokeServer("ProQuestProgress", "PlaceRelic") end)
+        task.wait(0.5)
+        return true
+    end
+
+    return false
+end
+
+-- ====================================================================
+-- 2. AUTO VALKYRIE HELM & AUTO SUMMON RIP INDRA (SEA 3)
+-- ====================================================================
+function SecretQuests.DoValkyrieHelm()
+    if not SecretQuests.AutoValkyrie or not CommF or Data.GetSea() ~= 3 or HasItem("Valkyrie Helm") then return false end
+
+    -- Check if rip_indra True Form is alive
+    local indra = Workspace:FindFirstChild("Enemies") and (Workspace.Enemies:FindFirstChild("rip_indra True Form") or Workspace.Enemies:FindFirstChild("rip_indra"))
+    if indra and IsMobAlive(indra) then
+        local mRoot = indra:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            HUDStatus = "Boss: Defeating rip_indra True Form [Valkyrie Helm / Tushita] 👑"
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(indra)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    -- Summon with God's Chalice if Auto Summon Rip Indra is true
+    if GH["Auto Summon Rip Indra"] and HasItem("God's Chalice") then
+        HUDStatus = "Summoning rip_indra with God's Chalice at Castle on the Sea..."
+        local indraAltar = CFrame.new(-5556.77, 313.79, -2988.49)
+        toTarget(indraAltar, 5)
+        local chaliceTool = LocalPlayer.Backpack:FindFirstChild("God's Chalice")
+        if chaliceTool then
+            chaliceTool.Parent = LocalPlayer.Character
+        end
+        task.wait(0.5)
+        return true
+    end
+
+    -- Server Hop if configured
+    if GH["Select Hop"] and GH["Select Hop"]["Hop Find Rip Indra Get Valkyrie Helm or Get Tushita"] and not indra and not HasItem("God's Chalice") then
+        HopServer("Finding rip_indra for Valkyrie Helm / Tushita")
+        return true
+    end
+
+    return false
+end
+
+-- ====================================================================
+-- 3. AUTO DOUGH KING & MIRROR FRACTAL (SEA 3)
+-- ====================================================================
+function SecretQuests.DoMirrorFractal()
+    if not SecretQuests.AutoMirrorFractal or not CommF or Data.GetSea() ~= 3 or HasItem("Mirror Fractal") then return false end
+
+    -- Check if Dough King is alive
+    local doughKing = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Dough King")
+    if doughKing and IsMobAlive(doughKing) then
+        local mRoot = doughKing:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            HUDStatus = "Boss: Defeating Dough King [Mirror Fractal] 🍩"
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(doughKing)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    -- Summon Dough King if player has Sweet Chalice
+    if HasItem("Sweet Chalice") then
+        HUDStatus = "Summoning Dough King with Sweet Chalice at Cake Island..."
+        local spawnerCF = CFrame.new(-2091.22, 70.01, -12143.08)
+        toTarget(spawnerCF, 5)
+        pcall(function() CommF:InvokeServer("CakePrinceSpawner") end)
+        task.wait(1)
+        return true
+    end
+
+    -- Craft Sweet Chalice with God's Chalice & 10 Cocoa
+    if HasItem("God's Chalice") then
+        pcall(function() CommF:InvokeServer("CakePrinceSpawner", "CraftSweetChalice") end)
+        task.wait(0.5)
+    end
+
+    -- Server Hop if configured
+    if GH["Select Hop"] and GH["Select Hop"]["Hop Find Dough King Get Mirror Fractal"] and not doughKing and not HasItem("Sweet Chalice") and not HasItem("God's Chalice") then
+        HopServer("Finding Dough King for Mirror Fractal")
+        return true
+    end
+
+    return false
+end
+
+-- ====================================================================
+-- 4. AUTO CURSED DUAL KATANA (YAMA, TUSHITA, CDK TRIALS)
+-- ====================================================================
 function SecretQuests.DoYama()
     if not SecretQuests.AutoYama or not CommF or Data.GetSea() ~= 3 or HasItem("Yama") then return false end
     local eliteKills = CommF:InvokeServer("EliteHunter", "Progress") or 0
@@ -1449,6 +1708,7 @@ function SecretQuests.DoYama()
                 if mob and IsMobAlive(mob) then
                     local mRoot = mob:FindFirstChild("HumanoidRootPart")
                     if mRoot then
+                        HUDStatus = string.format("CDK: Hunting Elite %s (%d/30 kills)", name, eliteKills)
                         toTarget(GetFarmCFrame(mRoot), 5)
                         BringMob(mob)
                         EquipWeapon()
@@ -1460,6 +1720,7 @@ function SecretQuests.DoYama()
         CommF:InvokeServer("EliteHunter")
         return false
     else
+        HUDStatus = "CDK: 30 Elites Killed! Pulling Yama at Waterfall Temple..."
         local sealedKatana = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Waterfall") and Workspace.Map.Waterfall:FindFirstChild("SealedKatana")
         if sealedKatana then
             local cd = sealedKatana:FindFirstChild("Hitbox") and sealedKatana.Hitbox:FindFirstChildOfClass("ClickDetector")
@@ -1468,7 +1729,7 @@ function SecretQuests.DoYama()
             end
             return true
         else
-            toTarget(CFrame.new(5251.90, 17.18, 453.60), 10)
+            toTarget(CFrame.new(5251.90, 17.18, 453.60), 5)
             return true
         end
     end
@@ -1476,66 +1737,825 @@ end
 
 function SecretQuests.DoTushita()
     if not SecretQuests.AutoTushita or not CommF or Data.GetSea() ~= 3 or HasItem("Tushita") then return false end
-    local ripIndra = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("rip_indra True Form")
-    if ripIndra and IsMobAlive(ripIndra) then
-        local door = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Waterfall") and Workspace.Map.Waterfall:FindFirstChild("SecretRoom")
-        if door then
-            toTarget(CFrame.new(5251.90, 17.18, 453.60), 10)
-            return true
-        end
-    end
+
+    -- Check if Longma is alive
     local longma = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Longma")
     if longma and IsMobAlive(longma) then
         local mRoot = longma:FindFirstChild("HumanoidRootPart")
         if mRoot then
+            HUDStatus = "Boss: Defeating Longma [Unlocking Tushita] 🗡️"
             toTarget(GetFarmCFrame(mRoot), 5)
             BringMob(longma)
             EquipWeapon()
             return true
         end
     end
+
+    -- If Rip Indra is alive, enter Waterfall secret door for 5 torches
+    local ripIndra = Workspace:FindFirstChild("Enemies") and (Workspace.Enemies:FindFirstChild("rip_indra True Form") or Workspace.Enemies:FindFirstChild("rip_indra"))
+    if ripIndra and IsMobAlive(ripIndra) then
+        HUDStatus = "CDK: Rip Indra Active! Entering Waterfall Door for Tushita..."
+        toTarget(CFrame.new(5251.90, 17.18, 453.60), 5)
+        return true
+    end
+
     return false
 end
 
 function SecretQuests.DoCDK()
     if not SecretQuests.AutoCDK or not CommF or Data.GetSea() ~= 3 or HasItem("Cursed Dual Katana") then return false end
     if not HasItem("Yama") or not HasItem("Tushita") then return false end
+
+    -- Check if Soul Reaper / Cake Queen are alive for CDK trials
+    local soulReaper = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Soul Reaper")
+    if soulReaper and IsMobAlive(soulReaper) then
+        local mRoot = soulReaper:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            HUDStatus = "CDK Trial: Engaging Soul Reaper Boss! ☠️"
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(soulReaper)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    local cakeQueen = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Cake Queen")
+    if cakeQueen and IsMobAlive(cakeQueen) then
+        local mRoot = cakeQueen:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            HUDStatus = "CDK Trial: Engaging Cake Queen Boss! 👑"
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(cakeQueen)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    -- CDK Crypt Master at Floating Turtle
+    HUDStatus = "CDK Quest: Talking to Crypt Master & Progressing Trials..."
     local cdkNPC = CFrame.new(-12061.27, 332.12, -7534.50)
     toTarget(cdkNPC, 5)
     pcall(function()
         CommF:InvokeServer("CDKQuest", "StartTrial", "Good")
         CommF:InvokeServer("CDKQuest", "StartTrial", "Evil")
+        CommF:InvokeServer("CDKQuest", "OpenDoor")
     end)
     return true
 end
 
-function SecretQuests.DoSoulGuitar()
-    if not SecretQuests.AutoSoulGuitar or not CommF or Data.GetSea() ~= 3 or HasItem("Soul Guitar") then return false end
-    local d = LocalPlayer:FindFirstChild("Data")
-    if not d or not d:FindFirstChild("Level") or d.Level.Value < 2300 then return false end
+-- ====================================================================
+-- 5. AUTO GODHUMAN (SEA 3 - MASTERY & ANCIENT MONK)
+-- ====================================================================
+function SecretQuests.DoGodhuman()
+    if not SecretQuests.AutoGodhuman or not CommF or Data.GetSea() ~= 3 or HasItem("Godhuman") or HasItem("GodHuman") then return false end
+    local monkCheck = nil
+    pcall(function() monkCheck = CommF:InvokeServer("BuyGodhuman", true) end)
+    if monkCheck == 3 then return false end -- Already owned
 
-    if IsNight() then
-        local graveCF = CFrame.new(-9515.00, 142.00, 5535.00)
-        toTarget(graveCF, 5)
-        pcall(function() CommF:InvokeServer("Gravstone", "Pray") end)
+    local d = LocalPlayer:FindFirstChild("Data")
+    local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
+    local frags = d and d:FindFirstChild("Fragments") and d.Fragments.Value or 0
+
+    if beli >= 5000000 and frags >= 5000 then
+        HUDStatus = "Godhuman: Visiting Ancient Monk to Unlock Godhuman! 🥋"
+        local monkTree = CFrame.new(-11015.82, 332.18, -10041.83)
+        toTarget(monkTree, 5)
+        pcall(function() CommF:InvokeServer("BuyGodhuman") end)
+        task.wait(1)
         return true
     end
     return false
 end
 
-function SecretQuests.Step()
-    if SecretQuests.DoYama() then return true end
-    if SecretQuests.DoTushita() then return true end
-    if SecretQuests.DoCDK() then return true end
-    if SecretQuests.DoSoulGuitar() then return true end
+-- ====================================================================
+-- 6. AUTO SOUL GUITAR (SEA 3 - HAUNTED CASTLE & FULL MOON)
+-- ====================================================================
+function SecretQuests.DoSoulGuitar()
+    if not SecretQuests.AutoSoulGuitar or not CommF or Data.GetSea() ~= 3 or HasItem("Soul Guitar") or HasItem("Skull Guitar") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    if not d or not d:FindFirstChild("Level") or d.Level.Value < 2300 then return false end
+
+    -- Check if Darkbeard is alive for Dark Fragment
+    local darkbeard = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Darkbeard")
+    if darkbeard and IsMobAlive(darkbeard) then
+        local mRoot = darkbeard:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            HUDStatus = "Boss: Defeating Darkbeard [Dark Fragment for Soul Guitar] 🌌"
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(darkbeard)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    if IsNight() then
+        HUDStatus = "Soul Guitar: Praying at Haunted Castle Gravestone..."
+        local graveCF = CFrame.new(-9515.00, 142.00, 5535.00)
+        toTarget(graveCF, 5)
+        pcall(function() CommF:InvokeServer("Gravstone", "Pray") end)
+        task.wait(0.5)
+        pcall(function() CommF:InvokeServer("SoulGuitar", "Craft") end)
+        return true
+    end
+
+    if GH["Select Hop"] and GH["Select Hop"]["Hop Find Darkbeard [SG]"] and not darkbeard and not HasItem("Dark Fragment") then
+        HopServer("Finding Darkbeard for Soul Guitar Dark Fragment")
+        return true
+    end
+
     return false
 end
 
 -- ====================================================================
--- 12. HEADS-UP DISPLAY (HUD)
+-- 7. AUTO PULL LEVER & RACE V4 MIRAGE ISLAND (SEA 3)
+-- ====================================================================
+function SecretQuests.DoPullLever()
+    if not SecretQuests.AutoPullLever or not CommF or Data.GetSea() ~= 3 then return false end
+
+    -- Check if Temple of Time Lever is already pulled
+    local m = Workspace:FindFirstChild("Map")
+    local tot = m and m:FindFirstChild("Temple of Time")
+    local lever = tot and tot:FindFirstChild("Lever")
+    if lever then
+        return false -- Lever already unlocked & available
+    end
+
+    -- Check Mirage Island
+    local mirage = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("MysticIsland")
+    if mirage then
+        HUDStatus = "Race V4: Mirage Island Active! Resonating with Moon & Finding Gear 🌙"
+        local peak = CFrame.new(mirage:GetPivot().Position + Vector3.new(0, 180, 0))
+        toTarget(peak, 5)
+        -- Activate Race V3 ability
+        pcall(function()
+            local v = VirtualInputManager
+            if v then v:SendKeyEvent(true, Enum.KeyCode.T, false, game) task.wait(0.1) v:SendKeyEvent(false, Enum.KeyCode.T, false, game) end
+        end)
+        task.wait(1)
+        return true
+    end
+
+    -- Visit Temple of Time and pull lever if unlocked
+    local templeRoom = CFrame.new(28282.57, 14896.85, 105.10)
+    toTarget(templeRoom, 5)
+    local pPrompt = Workspace:FindFirstChild("ProximityPrompt", true)
+    if pPrompt and typeof(fireproximityprompt) == "function" then
+        fireproximityprompt(pPrompt, 1)
+    end
+    return true
+end
+
+-- ====================================================================
+-- 8. AUTO RARE ITEMS (RENGOKU, DRAGON TRIDENT, POLE, GRAVITY BLADE, SHARK ANCHOR)
+-- ====================================================================
+function SecretQuests.DoRareItems()
+    local sea = Data.GetSea()
+
+    -- 1. Rengoku (Sea 2)
+    if SecretQuests.AutoRengoku and sea == 2 and not HasItem("Rengoku") then
+        if HasItem("Hidden Key") then
+            HUDStatus = "Rengoku: Unlocking Secret Chest with Hidden Key at Ice Castle! 🗝️"
+            local chestCF = CFrame.new(6508.56, 296.81, -6969.34)
+            toTarget(chestCF, 5)
+            task.wait(0.5)
+            return true
+        end
+        local iceBoss = Workspace:FindFirstChild("Enemies") and (Workspace.Enemies:FindFirstChild("Awakened Ice Admiral") or Workspace.Enemies:FindFirstChild("Arctic Warrior"))
+        if iceBoss and IsMobAlive(iceBoss) then
+            local mRoot = iceBoss:FindFirstChild("HumanoidRootPart")
+            if mRoot then
+                HUDStatus = "Rare Item: Farming Ice Admiral for Rengoku Hidden Key ❄️"
+                toTarget(GetFarmCFrame(mRoot), 5)
+                BringMob(iceBoss)
+                EquipWeapon()
+                return true
+            end
+        end
+    end
+
+    -- 2. Dragon Trident (Sea 3 - Island Empress)
+    if SecretQuests.AutoDragonTrident and sea == 3 and not HasItem("Dragon Trident") then
+        local empress = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Island Empress")
+        if empress and IsMobAlive(empress) then
+            local mRoot = empress:FindFirstChild("HumanoidRootPart")
+            if mRoot then
+                HUDStatus = "Rare Item: Hunting Island Empress for Dragon Trident 🔱"
+                toTarget(GetFarmCFrame(mRoot), 5)
+                BringMob(empress)
+                EquipWeapon()
+                return true
+            end
+        end
+    end
+
+    -- 3. Pole 1st Form (Sea 1 - Thunder God)
+    if SecretQuests.AutoPole and sea == 1 and not HasItem("Pole (1st Form)") then
+        local thunder = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Thunder God")
+        if thunder and IsMobAlive(thunder) then
+            local mRoot = thunder:FindFirstChild("HumanoidRootPart")
+            if mRoot then
+                HUDStatus = "Rare Item: Hunting Thunder God for Pole (1st Form) ⚡"
+                toTarget(GetFarmCFrame(mRoot), 5)
+                BringMob(thunder)
+                EquipWeapon()
+                return true
+            end
+        end
+    end
+
+    -- 4. Gravity Blade (Sea 2 - Fajita)
+    if SecretQuests.AutoGravityBlade and sea == 2 and not HasItem("Gravity Blade") then
+        local fajita = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Fajita")
+        if fajita and IsMobAlive(fajita) then
+            local mRoot = fajita:FindFirstChild("HumanoidRootPart")
+            if mRoot then
+                HUDStatus = "Rare Item: Hunting Fajita for Gravity Blade 🌌"
+                toTarget(GetFarmCFrame(mRoot), 5)
+                BringMob(fajita)
+                EquipWeapon()
+                return true
+            end
+        end
+    end
+
+    -- 5. Shark Anchor (Sea 3 - Terror Shark)
+    if SecretQuests.AutoSharkAnchor and sea == 3 and not HasItem("Shark Anchor") then
+        local terrorShark = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Terror Shark")
+        if terrorShark and IsMobAlive(terrorShark) then
+            local mRoot = terrorShark:FindFirstChild("HumanoidRootPart")
+            if mRoot then
+                HUDStatus = "Endgame: Hunting 195k HP Terror Shark for Shark Anchor ⚓"
+                toTarget(GetFarmCFrame(mRoot), 5)
+                BringMob(terrorShark)
+                EquipWeapon()
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+-- ====================================================================
+-- MASTER ENDGAME QUEST STEPPER
+-- Runs each quest in optimal progression priority
+-- ====================================================================
+function SecretQuests.Step()
+    AutoBuyHaki()
+
+    -- Sea 1 Quests
+    if SecretQuests.DoSaber() then return true end
+
+    -- Sea 3 Quests & Bosses
+    if SecretQuests.DoValkyrieHelm() then return true end
+    if SecretQuests.DoMirrorFractal() then return true end
+    if SecretQuests.DoYama() then return true end
+    if SecretQuests.DoTushita() then return true end
+    if SecretQuests.DoCDK() then return true end
+    if SecretQuests.DoGodhuman() then return true end
+    if SecretQuests.DoSoulGuitar() then return true end
+    if SecretQuests.DoPullLever() then return true end
+
+    -- Rare Weapons
+    if SecretQuests.DoRareItems() then return true end
+
+    return false
+end
+
+
+-- ====================================================================
+-- AUTO BLOX FRUITS DLC CODE REDEEMER (2x EXP, STAT RESETS, BELI)
+-- ====================================================================
+local BF_CODES = {
+    "SUB2GAMERROBOT_EXP1",
+    "SUB2GAMERROBOT_RESET1",
+    "EASTEREXP",
+    "LIGHTNINGABUSE",
+    "KITT_RESET",
+    "Sub2UncleKizaru",
+    "Fudd10",
+    "fudd10_v2",
+    "Bignews",
+    "Axiore",
+    "Bluxxy",
+    "Enyu_is_Pro",
+    "JCWK",
+    "Kittgaming",
+    "Magicbus",
+    "Starcodeheo",
+    "StrawHatMaine",
+    "Sub2CaptainMaui",
+    "Sub2Daigrock",
+    "Sub2Fer999",
+    "Sub2NoobMaster123",
+    "Sub2OfficialNoobie",
+    "TantaiGaming",
+    "TheGreatAce",
+    "CHANDLER"
+}
+
+local function RedeemAllDLCCodes()
+    task.spawn(function()
+        local remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+        local redeemRemote = remotes and remotes:FindFirstChild("Redeem")
+        if not redeemRemote then return end
+        for _, code in ipairs(BF_CODES) do
+            pcall(function()
+                HUDStatus = "Redeeming DLC Code: " .. code
+                redeemRemote:InvokeServer(code)
+            end)
+            task.wait(0.35)
+        end
+        HUDStatus = "All DLC Codes Redeemed!"
+        task.wait(1)
+    end)
+end
+
+
+-- ====================================================================
+-- 12. STATS CHECKER HUD & FLOATING TOGGLE (MATCHING TEDDY HUB LAYOUT)
 -- ====================================================================
 local HUDStatus = "Starting up..."
+local HUDSubStatus = "Black Leg: beli"
+local UI_Visible = true
+
+local function FormatNumber(n)
+    local num = tonumber(n) or 0
+    local left, center, right = string.match(tostring(num), '^([^%d]*%d)(%d*)(.-)$')
+    if not left then return tostring(num) end
+    return left .. (center:reverse():gsub('(%d%d%d)', '%1,'):reverse()) .. right
+end
+
+local function GetSafeGuiParent()
+    local success, target = pcall(function() return CoreGui end)
+    if success and target then return target end
+    return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Inventory & Milestone Checking Helpers
+local InventoryCache = {}
+local LastInvCheck = 0
+local function UpdateInventoryCache()
+    if tick() - LastInvCheck > 2.5 then
+        LastInvCheck = tick()
+        pcall(function()
+            local comm = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
+            if comm then
+                local res = comm:InvokeServer("getInventory")
+                if type(res) == "table" then
+                    InventoryCache = {}
+                    for _, item in ipairs(res) do
+                        if item.Name then
+                            InventoryCache[item.Name] = true
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end
+
+local function CheckItemOwned(name)
+    pcall(UpdateInventoryCache)
+    if LocalPlayer.Backpack:FindFirstChild(name) then return true end
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild(name) then return true end
+    if InventoryCache[name] then return true end
+    if name == "GodHuman" or name == "Godhuman" then
+        if InventoryCache["Godhuman"] or InventoryCache["GodHuman"] then return true end
+        local r = nil
+        pcall(function()
+            r = ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyGodhuman", true)
+        end)
+        if r == 3 then return true end
+    elseif name == "Skull Guitar" or name == "Soul Guitar" then
+        if InventoryCache["Soul Guitar"] or InventoryCache["Skull Guitar"] then return true end
+    end
+    return false
+end
+
+local function CheckPullLeverStatus()
+    local sea = Data.GetSea()
+    if sea < 3 then
+        return "LOCKED"
+    end
+    local m = Workspace:FindFirstChild("Map")
+    local tot = m and m:FindFirstChild("Temple of Time")
+    local lever = tot and tot:FindFirstChild("Lever")
+    if lever then
+        return "DONE"
+    end
+    return "PENDING"
+end
+
+local function MakeDraggable(guiObject, clickCallback)
+    local dragging = false
+    local dragInput, dragStart, startPos
+    local hasMoved = false
+
+    guiObject.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            hasMoved = false
+            dragStart = input.Position
+            startPos = guiObject.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if not hasMoved and clickCallback then
+                        clickCallback()
+                    end
+                end
+            end)
+        end
+    end)
+
+    guiObject.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            if math.abs(delta.X) > 4 or math.abs(delta.Y) > 4 then
+                hasMoved = true
+            end
+            guiObject.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
 local function CreateHUD()
+    if GH["Hide UI"] then return end
+    pcall(function()
+        local parent = GetSafeGuiParent()
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "BananaKaitunStatsHUD"
+        sg.ResetOnSpawn = false
+        sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+        -- 1. FLOATING TOGGLE BUTTON (Left side circular toggle)
+        local floatBtn = Instance.new("Frame")
+        floatBtn.Name = "FloatingToggle"
+        floatBtn.Size = UDim2.new(0, 52, 0, 52)
+        floatBtn.Position = UDim2.new(0, 20, 0.28, 0)
+        floatBtn.BackgroundColor3 = Color3.fromRGB(15, 12, 24)
+        floatBtn.BorderSizePixel = 0
+        floatBtn.Active = true
+        floatBtn.Parent = sg
+
+        local floatCorner = Instance.new("UICorner")
+        floatCorner.CornerRadius = UDim.new(1, 0)
+        floatCorner.Parent = floatBtn
+
+        local floatStroke = Instance.new("UIStroke")
+        floatStroke.Color = Color3.fromRGB(175, 100, 255)
+        floatStroke.Thickness = 2.5
+        floatStroke.Parent = floatBtn
+
+        local floatIcon = Instance.new("TextLabel")
+        floatIcon.Size = UDim2.new(1, 0, 1, 0)
+        floatIcon.BackgroundTransparency = 1
+        floatIcon.Text = "🍌"
+        floatIcon.TextSize = 26
+        floatIcon.Font = Enum.Font.GothamBold
+        floatIcon.TextColor3 = Color3.fromRGB(245, 185, 30)
+        floatIcon.Parent = floatBtn
+
+        -- 2. MAIN STATS CHECKER WINDOW
+        local main = Instance.new("Frame")
+        main.Name = "MainFrame"
+        main.AnchorPoint = Vector2.new(0.5, 0.5)
+        main.Size = UDim2.new(0, 560, 0, 330)
+        main.Position = UDim2.new(0.5, 0, 0.5, 0)
+        main.BackgroundColor3 = Color3.fromRGB(16, 14, 24)
+        main.BackgroundTransparency = 0.15
+        main.BorderSizePixel = 0
+        main.Active = true
+        main.Parent = sg
+
+        local mainCorner = Instance.new("UICorner")
+        mainCorner.CornerRadius = UDim.new(0, 12)
+        mainCorner.Parent = main
+
+        local mainStroke = Instance.new("UIStroke")
+        mainStroke.Color = Color3.fromRGB(165, 95, 255)
+        mainStroke.Thickness = 2
+        mainStroke.Parent = main
+
+        -- Top Header: <Sea> & Title
+        local seaTitle = Instance.new("TextLabel")
+        seaTitle.Name = "SeaTitle"
+        seaTitle.Size = UDim2.new(1, 0, 0, 22)
+        seaTitle.Position = UDim2.new(0, 0, 0, 10)
+        seaTitle.BackgroundTransparency = 1
+        seaTitle.Text = "<Sea 1>"
+        seaTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+        seaTitle.Font = Enum.Font.GothamBold
+        seaTitle.TextSize = 18
+        seaTitle.TextXAlignment = Enum.TextXAlignment.Center
+        seaTitle.Parent = main
+
+        local subTitle = Instance.new("TextLabel")
+        subTitle.Name = "SubTitle"
+        subTitle.Size = UDim2.new(1, 0, 0, 18)
+        subTitle.Position = UDim2.new(0, 0, 0, 32)
+        subTitle.BackgroundTransparency = 1
+        subTitle.Text = "Teddy Hub Stats Checker"
+        subTitle.TextColor3 = Color3.fromRGB(180, 130, 255)
+        subTitle.Font = Enum.Font.GothamBold
+        subTitle.TextSize = 15
+        subTitle.TextXAlignment = Enum.TextXAlignment.Center
+        subTitle.Parent = main
+
+        -- Top Divider Line
+        local div1 = Instance.new("Frame")
+        div1.Name = "Divider1"
+        div1.Size = UDim2.new(0.92, 0, 0, 1.5)
+        div1.Position = UDim2.new(0.04, 0, 0, 56)
+        div1.BackgroundColor3 = Color3.fromRGB(190, 190, 200)
+        div1.BorderSizePixel = 0
+        div1.Parent = main
+
+        -- Dynamic Status Banner (Tween To Mob Spawn / Action)
+        local actionLabel = Instance.new("TextLabel")
+        actionLabel.Name = "ActionLabel"
+        actionLabel.Size = UDim2.new(0.92, 0, 0, 18)
+        actionLabel.Position = UDim2.new(0.04, 0, 0, 60)
+        actionLabel.BackgroundTransparency = 1
+        actionLabel.Text = "Tween To Mob Spawn [Sky Bandit]"
+        actionLabel.TextColor3 = Color3.fromRGB(220, 220, 230)
+        actionLabel.Font = Enum.Font.GothamMedium
+        actionLabel.TextSize = 12
+        actionLabel.TextXAlignment = Enum.TextXAlignment.Center
+        actionLabel.Parent = main
+
+        local subActionLabel = Instance.new("TextLabel")
+        subActionLabel.Name = "SubActionLabel"
+        subActionLabel.Size = UDim2.new(0.92, 0, 0, 16)
+        subActionLabel.Position = UDim2.new(0.04, 0, 0, 78)
+        subActionLabel.BackgroundTransparency = 1
+        subActionLabel.Text = "Black Leg: beli"
+        subActionLabel.TextColor3 = Color3.fromRGB(180, 130, 240)
+        subActionLabel.Font = Enum.Font.Gotham
+        subActionLabel.TextSize = 11
+        subActionLabel.TextXAlignment = Enum.TextXAlignment.Center
+        subActionLabel.Parent = main
+
+        -- MIDDLE TWO-COLUMN STATS GRID
+        -- Left Column: Account Stats
+        local accStatsHeader = Instance.new("TextLabel")
+        accStatsHeader.Size = UDim2.new(0.4, 0, 0, 20)
+        accStatsHeader.Position = UDim2.new(0.08, 0, 0, 98)
+        accStatsHeader.BackgroundTransparency = 1
+        accStatsHeader.Text = "Account Stats"
+        accStatsHeader.TextColor3 = Color3.fromRGB(185, 120, 255)
+        accStatsHeader.Font = Enum.Font.GothamBold
+        accStatsHeader.TextSize = 14
+        accStatsHeader.TextXAlignment = Enum.TextXAlignment.Left
+        accStatsHeader.Parent = main
+
+        local levelLabel = Instance.new("TextLabel")
+        levelLabel.Name = "LevelLabel"
+        levelLabel.Size = UDim2.new(0.4, 0, 0, 20)
+        levelLabel.Position = UDim2.new(0.08, 0, 0, 126)
+        levelLabel.BackgroundTransparency = 1
+        levelLabel.Text = "Level: 10"
+        levelLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        levelLabel.Font = Enum.Font.GothamBold
+        levelLabel.TextSize = 14
+        levelLabel.TextXAlignment = Enum.TextXAlignment.Left
+        levelLabel.Parent = main
+
+        local raceLabel = Instance.new("TextLabel")
+        raceLabel.Name = "RaceLabel"
+        raceLabel.Size = UDim2.new(0.4, 0, 0, 20)
+        raceLabel.Position = UDim2.new(0.08, 0, 0, 154)
+        raceLabel.BackgroundTransparency = 1
+        raceLabel.Text = "Race: Human"
+        raceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        raceLabel.Font = Enum.Font.GothamBold
+        raceLabel.TextSize = 14
+        raceLabel.TextXAlignment = Enum.TextXAlignment.Left
+        raceLabel.Parent = main
+
+        local beliLabel = Instance.new("TextLabel")
+        beliLabel.Name = "BeliLabel"
+        beliLabel.Size = UDim2.new(0.4, 0, 0, 20)
+        beliLabel.Position = UDim2.new(0.08, 0, 0, 182)
+        beliLabel.BackgroundTransparency = 1
+        beliLabel.Text = "Beli: 2,128"
+        beliLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        beliLabel.Font = Enum.Font.GothamBold
+        beliLabel.TextSize = 14
+        beliLabel.TextXAlignment = Enum.TextXAlignment.Left
+        beliLabel.Parent = main
+
+        local fragLabel = Instance.new("TextLabel")
+        fragLabel.Name = "FragLabel"
+        fragLabel.Size = UDim2.new(0.4, 0, 0, 20)
+        fragLabel.Position = UDim2.new(0.08, 0, 0, 210)
+        fragLabel.BackgroundTransparency = 1
+        fragLabel.Text = "Frag: 0"
+        fragLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        fragLabel.Font = Enum.Font.GothamBold
+        fragLabel.TextSize = 14
+        fragLabel.TextXAlignment = Enum.TextXAlignment.Left
+        fragLabel.Parent = main
+
+        -- Right Column: Account Items
+        local accItemsHeader = Instance.new("TextLabel")
+        accItemsHeader.Size = UDim2.new(0.4, 0, 0, 20)
+        accItemsHeader.Position = UDim2.new(0.58, 0, 0, 98)
+        accItemsHeader.BackgroundTransparency = 1
+        accItemsHeader.Text = "Account Items"
+        accItemsHeader.TextColor3 = Color3.fromRGB(185, 120, 255)
+        accItemsHeader.Font = Enum.Font.GothamBold
+        accItemsHeader.TextSize = 14
+        accItemsHeader.TextXAlignment = Enum.TextXAlignment.Left
+        accItemsHeader.Parent = main
+
+        local itemsListFrame = Instance.new("Frame")
+        itemsListFrame.Name = "ItemsListFrame"
+        itemsListFrame.Size = UDim2.new(0.38, 0, 0, 110)
+        itemsListFrame.Position = UDim2.new(0.58, 0, 0, 124)
+        itemsListFrame.BackgroundTransparency = 1
+        itemsListFrame.BorderSizePixel = 0
+        itemsListFrame.Parent = main
+
+        local itemsLayout = Instance.new("UIListLayout")
+        itemsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        itemsLayout.Padding = UDim.new(0, 6)
+        itemsLayout.Parent = itemsListFrame
+
+        -- Bottom Divider Line
+        local div2 = Instance.new("Frame")
+        div2.Name = "Divider2"
+        div2.Size = UDim2.new(0.92, 0, 0, 1.5)
+        div2.Position = UDim2.new(0.04, 0, 0, 238)
+        div2.BackgroundColor3 = Color3.fromRGB(190, 190, 200)
+        div2.BorderSizePixel = 0
+        div2.Parent = main
+
+        -- Bottom Milestone Badges (2 rows of 3)
+        local function CreateMilestoneBadge(parentObj, name, xPos, yPos)
+            local container = Instance.new("Frame")
+            container.Name = name:gsub("%s+", "") .. "Badge"
+            container.Size = UDim2.new(0.3, 0, 0, 22)
+            container.Position = UDim2.new(xPos, 0, 0, yPos)
+            container.BackgroundTransparency = 1
+            container.Parent = parentObj
+
+            local dot = Instance.new("Frame")
+            dot.Name = "Dot"
+            dot.Size = UDim2.new(0, 10, 0, 10)
+            dot.Position = UDim2.new(0, 0, 0.5, -5)
+            dot.BackgroundColor3 = Color3.fromRGB(255, 65, 80) -- Default Red
+            dot.BorderSizePixel = 0
+            dot.Parent = container
+
+            local dotCorner = Instance.new("UICorner")
+            dotCorner.CornerRadius = UDim.new(1, 0)
+            dotCorner.Parent = dot
+
+            local text = Instance.new("TextLabel")
+            text.Name = "Label"
+            text.Size = UDim2.new(1, -16, 1, 0)
+            text.Position = UDim2.new(0, 16, 0, 0)
+            text.BackgroundTransparency = 1
+            text.Text = name
+            text.TextColor3 = Color3.fromRGB(255, 255, 255)
+            text.Font = Enum.Font.GothamBold
+            text.TextSize = 13
+            text.TextXAlignment = Enum.TextXAlignment.Left
+            text.Parent = container
+
+            return {
+                Container = container,
+                Dot = dot,
+                Label = text,
+                SetStatus = function(status)
+                    if status == true or status == "DONE" then
+                        dot.BackgroundColor3 = Color3.fromRGB(50, 240, 110) -- Green
+                    elseif status == "LOCKED" then
+                        dot.BackgroundColor3 = Color3.fromRGB(150, 160, 175) -- Grey
+                    else
+                        dot.BackgroundColor3 = Color3.fromRGB(255, 65, 80) -- Red
+                    end
+                end
+            }
+        end
+
+        local badges = {
+            Godhuman = CreateMilestoneBadge(main, "GodHuman", 0.05, 248),
+            CDK = CreateMilestoneBadge(main, "Cursed Dual Katana", 0.38, 248),
+            Valkyrie = CreateMilestoneBadge(main, "Valkyrie Helm", 0.71, 248),
+            SoulGuitar = CreateMilestoneBadge(main, "Skull Guitar", 0.05, 280),
+            MirrorFractal = CreateMilestoneBadge(main, "Mirror Fractal", 0.38, 280),
+            PullLever = CreateMilestoneBadge(main, "Pull Lever", 0.71, 280),
+        }
+
+        -- DRAGGABLE LOGIC FOR FLOATING BUTTON & MAIN FRAME
+        MakeDraggable(floatBtn, function()
+            UI_Visible = not UI_Visible
+            main.Visible = UI_Visible
+        end)
+
+        MakeDraggable(main, nil)
+
+        sg.Parent = parent
+
+        -- Automatically trigger DLC Code redemption
+        RedeemAllDLCCodes()
+
+        -- TELEMETRY & STATUS REFRESH LOOP
+        task.spawn(function()
+            while true do
+                task.wait(1)
+                pcall(function()
+                    local d = LocalPlayer:FindFirstChild("Data")
+                    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+                    local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
+                    local frags = d and d:FindFirstChild("Fragments") and d.Fragments.Value or 0
+                    local raceName = (d and d:FindFirstChild("Race") and d.Race.Value) or GetPlayerRace() or "Human"
+                    local sea = Data.GetSea()
+
+                    seaTitle.Text = string.format("<Sea %d>", sea)
+                    levelLabel.Text = "Level: " .. tostring(lvl)
+                    raceLabel.Text = "Race: " .. tostring(raceName)
+                    beliLabel.Text = "Beli: " .. FormatNumber(beli)
+                    fragLabel.Text = "Frag: " .. FormatNumber(frags)
+
+                    actionLabel.Text = HUDStatus
+                    subActionLabel.Text = HUDSubStatus
+
+                    -- Refresh Account Items list
+                    for _, child in ipairs(itemsListFrame:GetChildren()) do
+                        if child:IsA("TextLabel") then child:Destroy() end
+                    end
+
+                    local itemsCount = {}
+                    for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
+                        if tool:IsA("Tool") then
+                            itemsCount[tool.Name] = (itemsCount[tool.Name] or 0) + 1
+                        end
+                    end
+                    if LocalPlayer.Character then
+                        for _, tool in ipairs(LocalPlayer.Character:GetChildren()) do
+                            if tool:IsA("Tool") then
+                                itemsCount[tool.Name] = (itemsCount[tool.Name] or 0) + 1
+                            end
+                        end
+                    end
+
+                    local displayed = 0
+                    for itemName, count in pairs(itemsCount) do
+                        if displayed < 4 then
+                            local itemLbl = Instance.new("TextLabel")
+                            itemLbl.Size = UDim2.new(1, 0, 0, 18)
+                            itemLbl.BackgroundTransparency = 1
+                            itemLbl.Text = string.format("%s x%d", itemName, count)
+                            itemLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+                            itemLbl.Font = Enum.Font.GothamBold
+                            itemLbl.TextSize = 13
+                            itemLbl.TextXAlignment = Enum.TextXAlignment.Left
+                            itemLbl.Parent = itemsListFrame
+                            displayed = displayed + 1
+                        end
+                    end
+                    if displayed == 0 then
+                        local emptyLbl = Instance.new("TextLabel")
+                        emptyLbl.Size = UDim2.new(1, 0, 0, 18)
+                        emptyLbl.BackgroundTransparency = 1
+                        emptyLbl.Text = "Tool x1"
+                        emptyLbl.TextColor3 = Color3.fromRGB(180, 180, 180)
+                        emptyLbl.Font = Enum.Font.GothamBold
+                        emptyLbl.TextSize = 13
+                        emptyLbl.TextXAlignment = Enum.TextXAlignment.Left
+                        emptyLbl.Parent = itemsListFrame
+                    end
+
+                    -- Refresh Milestone Badges
+                    badges.Godhuman.SetStatus(CheckItemOwned("Godhuman") or CheckItemOwned("GodHuman"))
+                    badges.CDK.SetStatus(CheckItemOwned("Cursed Dual Katana"))
+                    badges.Valkyrie.SetStatus(CheckItemOwned("Valkyrie Helm"))
+                    badges.SoulGuitar.SetStatus(CheckItemOwned("Soul Guitar") or CheckItemOwned("Skull Guitar"))
+                    badges.MirrorFractal.SetStatus(CheckItemOwned("Mirror Fractal"))
+                    badges.PullLever.SetStatus(CheckPullLeverStatus())
+                end)
+            end
+        end)
+    end)
+end
+CreateHUD()
+
     if GH["Hide UI"] then return end
     pcall(function()
         local sg = Instance.new("ScreenGui")
@@ -1686,7 +2706,7 @@ task.spawn(function()
                 local enemies = Workspace:FindFirstChild("Enemies")
                 if enemies then
                     for _, mob in ipairs(enemies:GetChildren()) do
-                        if mob.Name:find(quest.Mob) and IsMobAlive(mob) then
+                        if (mob.Name == quest.Mob or (mob.Name:find(quest.Mob) and not mob.Name:find("Escap"))) and IsMobAlive(mob) then
                             targetMob = mob
                             break
                         end
