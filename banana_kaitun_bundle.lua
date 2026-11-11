@@ -13,6 +13,7 @@ repeat wait() until game:IsLoaded() and game:GetService("Players").LocalPlayer
 -- ====================================================================
 getgenv().GravityHub = getgenv().GravityHub or {
     ["Hide UI"] = false,
+    ["Team"] = "Pirates", -- "Pirates" or "Marines" (Default: "Pirates")
     ["Reset Teleport"] = {
         ["Enabled"] = false,
         ["Delay Reset"] = 3,
@@ -140,6 +141,123 @@ local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 local CollectionService = game:GetService("CollectionService")
 local LocalPlayer = Players.LocalPlayer
+
+-- ====================================================================
+-- AUTO REJOIN & QUEUE ON TELEPORT (PERSIST ACROSS SEAS, HOPS & DISCONNECTS)
+-- ====================================================================
+local function QueueAutoExecute()
+    pcall(function()
+        local qot = syn and syn.queue_on_teleport or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+        if qot then
+            qot([[
+                repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
+                pcall(function()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/abhishek015807-oss/testt/refs/heads/main/banana_kaitun_bundle.lua?t=" .. tostring(tick())))()
+                end)
+            ]])
+        end
+    end)
+end
+QueueAutoExecute()
+
+-- Teleport listener to re-queue before leaving server
+pcall(function()
+    LocalPlayer.OnTeleport:Connect(function()
+        QueueAutoExecute()
+    end)
+end)
+
+-- Auto Rejoin on Disconnect / Kick (Error 277, 267, 268)
+task.spawn(function()
+    pcall(function()
+        local GuiService = game:GetService("GuiService")
+        local TeleportService = game:GetService("TeleportService")
+
+        GuiService.ErrorMessageChanged:Connect(function()
+            task.wait(2.5)
+            QueueAutoExecute()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+
+        local promptOverlay = CoreGui:WaitForChild("RobloxPromptGui", 4) and CoreGui.RobloxPromptGui:WaitForChild("promptOverlay", 4)
+        if promptOverlay then
+            promptOverlay.ChildAdded:Connect(function(child)
+                if child.Name == "ErrorPrompt" then
+                    task.wait(2.5)
+                    QueueAutoExecute()
+                    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+                end
+            end)
+        end
+    end)
+end)
+
+-- ====================================================================
+-- AUTO TEAM SELECTOR (PIRATES / MARINES)
+-- Automatically bypasses team selection screen so script runs immediately
+-- ====================================================================
+local function AutoSelectTeam()
+    local configuredTeam = (GH and GH["Team"]) or getgenv().Team or "Pirates"
+    local selectTeam = "Pirates"
+    if tostring(configuredTeam):lower():find("marine") then
+        selectTeam = "Marines"
+    else
+        selectTeam = "Pirates"
+    end
+
+    -- Remote execution
+    pcall(function()
+        local remotes = ReplicatedStorage:WaitForChild("Remotes", 3)
+        if remotes and remotes:FindFirstChild("CommF_") then
+            remotes.CommF_:InvokeServer("SetTeam", selectTeam)
+        end
+    end)
+
+    -- UI button click fallback
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then
+            local mainGui = pg:FindFirstChild("Main (minimal)") or pg:FindFirstChild("Main")
+            if mainGui and mainGui:FindFirstChild("ChooseTeam") then
+                local ct = mainGui.ChooseTeam
+                if ct.Visible then
+                    local container = ct:FindFirstChild("Container")
+                    if container then
+                        local teamFolder = (selectTeam == "Pirates") and container:FindFirstChild("Pirates") or container:FindFirstChild("Marines")
+                        if teamFolder and teamFolder:FindFirstChild("Frame") and teamFolder.Frame:FindFirstChild("TextButton") then
+                            local btn = teamFolder.Frame.TextButton
+                            if typeof(getconnections) == "function" then
+                                for _, c in pairs(getconnections(btn.MouseButton1Click or btn.Activated)) do
+                                    pcall(function() c:Fire() end)
+                                end
+                            end
+                        end
+                    end
+                    ct.Visible = false
+                end
+            end
+        end
+    end)
+end
+
+-- Wait for team and character spawn
+if not LocalPlayer.Team then
+    AutoSelectTeam()
+    local waitStart = tick()
+    repeat
+        task.wait(0.5)
+        if not LocalPlayer.Team then
+            AutoSelectTeam()
+        end
+    until LocalPlayer.Team or (tick() - waitStart > 10)
+end
+
+-- Ensure character and rootpart are spawned before continuing
+if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+    LocalPlayer.CharacterAdded:Wait()
+    LocalPlayer.Character:WaitForChild("HumanoidRootPart", 10)
+end
+
 
 -- ====================================================================
 -- ULTRA FPS BOOST: CLAY CHARACTER VOID MODE (AUTOMATIC ON EXECUTE)
