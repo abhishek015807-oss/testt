@@ -9,6 +9,45 @@
 repeat wait() until game:IsLoaded() and game:GetService("Players").LocalPlayer
 
 -- ====================================================================
+-- BANANA KAITUN - SINGLETON EXECUTION GUARD (PREVENTS 2x / 3x MULTI-EXECUTE)
+-- Automatically cancels out duplicate executions if script is already running
+-- ====================================================================
+local g = getgenv()
+if g.__BananaKaitun_Active and g.__BananaKaitun_RT and g.__BananaKaitun_RT.alive and not g.ForceReload and not g.__BananaKaitun_ForceReload then
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "🍌 Banana Hub Kaitun",
+            Text = "Script is already running! Duplicate execution cancelled.",
+            Duration = 4
+        })
+    end)
+    warn("[🍌 Banana Hub Kaitun] Script is ALREADY ACTIVE & RUNNING! Duplicate execution cancelled.")
+    return
+end
+
+-- If previous instance requested reload, cleanly shut it down first
+if type(g.__BananaKaitun_Shutdown) == "function" then
+    pcall(g.__BananaKaitun_Shutdown)
+end
+
+-- Destroy existing duplicate UIs in CoreGui or PlayerGui
+pcall(function()
+    local core = game:GetService("CoreGui")
+    local lp = game:GetService("Players").LocalPlayer
+    local pg = lp and lp:FindFirstChild("PlayerGui")
+    for _, parent in ipairs({ core, pg }) do
+        if parent then
+            local old1 = parent:FindFirstChild("BananaKaitunStatsHUD")
+            if old1 then old1:Destroy() end
+            local old2 = parent:FindFirstChild("BananaKaitunStandalone")
+            if old2 then old2:Destroy() end
+        end
+    end
+end)
+
+g.__BananaKaitun_Active = true
+
+-- ====================================================================
 -- DEFAULT CONFIGURATION (GRAVITYHUB SCHEMA SPECIFICATION)
 -- ====================================================================
 getgenv().GravityHub = getgenv().GravityHub or {
@@ -105,6 +144,7 @@ do
     end
     g.__BananaKaitun_Shutdown = function()
         runtime.alive = false
+        g.__BananaKaitun_Active = false
         for _, c in ipairs(runtime.conns) do
             pcall(function() c:Disconnect() end)
         end
@@ -425,7 +465,7 @@ local function ApplyTeleportTag()
 end
 
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(0.1)
         if TagActive and tick() >= TagExpires then
             CollectionService:RemoveTag(LocalPlayer, "Teleporting")
@@ -996,7 +1036,7 @@ local function Attack()
 end
 
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(0.05)
         Attack()
     end
@@ -1117,7 +1157,7 @@ end
 
 -- Auto Stat Allocator
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(5)
         pcall(function()
             local data = LocalPlayer:FindFirstChild("Data")
@@ -1133,7 +1173,7 @@ end)
 
 -- Fruit Gacha, Storage & Sniper Shop
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(10)
         pcall(function()
             if CommF then
@@ -1170,7 +1210,7 @@ end)
 
 -- Buy Haki Engine (Enhancement, Skyjump, Flash Step, Observation)
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(15)
         pcall(function()
             local haki = GH["Buy Haki"]
@@ -1186,7 +1226,7 @@ end)
 
 -- Auto Chat
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(20)
         pcall(function()
             local ac = GH["Auto Chat"]
@@ -2595,7 +2635,7 @@ local function CreateHUD()
 
         -- TELEMETRY & STATUS REFRESH LOOP
         task.spawn(function()
-            while true do
+            while runtime.alive do
                 task.wait(1)
                 pcall(function()
                     local d = LocalPlayer:FindFirstChild("Data")
@@ -2678,7 +2718,7 @@ CreateHUD()
 -- 13. MASTER AUTONOMOUS PROGRESSION LOOP (1 TO MAX 2550+)
 -- ====================================================================
 task.spawn(function()
-    while true do
+    while runtime.alive do
         task.wait(0.1)
         pcall(function()
             local data = LocalPlayer:FindFirstChild("Data")
