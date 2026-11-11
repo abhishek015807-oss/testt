@@ -2216,7 +2216,7 @@ local function CreateHUD()
         floatCorner.Parent = floatBtn
 
         local floatStroke = Instance.new("UIStroke")
-        floatStroke.Color = Color3.fromRGB(175, 100, 255)
+        floatStroke.Color = Color3.fromRGB(250, 195, 35)
         floatStroke.Thickness = 2.5
         floatStroke.Parent = floatBtn
 
@@ -2246,7 +2246,7 @@ local function CreateHUD()
         mainCorner.Parent = main
 
         local mainStroke = Instance.new("UIStroke")
-        mainStroke.Color = Color3.fromRGB(165, 95, 255)
+        mainStroke.Color = Color3.fromRGB(250, 195, 35)
         mainStroke.Thickness = 2
         mainStroke.Parent = main
 
@@ -2268,8 +2268,8 @@ local function CreateHUD()
         subTitle.Size = UDim2.new(1, 0, 0, 18)
         subTitle.Position = UDim2.new(0, 0, 0, 32)
         subTitle.BackgroundTransparency = 1
-        subTitle.Text = "Teddy Hub Stats Checker"
-        subTitle.TextColor3 = Color3.fromRGB(180, 130, 255)
+        subTitle.Text = "Banana Hub Stats Checker"
+        subTitle.TextColor3 = Color3.fromRGB(250, 195, 35)
         subTitle.Font = Enum.Font.GothamBold
         subTitle.TextSize = 15
         subTitle.TextXAlignment = Enum.TextXAlignment.Center
@@ -2303,7 +2303,7 @@ local function CreateHUD()
         subActionLabel.Position = UDim2.new(0.04, 0, 0, 78)
         subActionLabel.BackgroundTransparency = 1
         subActionLabel.Text = "Black Leg: beli"
-        subActionLabel.TextColor3 = Color3.fromRGB(180, 130, 240)
+        subActionLabel.TextColor3 = Color3.fromRGB(240, 210, 100)
         subActionLabel.Font = Enum.Font.Gotham
         subActionLabel.TextSize = 11
         subActionLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -2316,7 +2316,7 @@ local function CreateHUD()
         accStatsHeader.Position = UDim2.new(0.08, 0, 0, 98)
         accStatsHeader.BackgroundTransparency = 1
         accStatsHeader.Text = "Account Stats"
-        accStatsHeader.TextColor3 = Color3.fromRGB(185, 120, 255)
+        accStatsHeader.TextColor3 = Color3.fromRGB(250, 195, 35)
         accStatsHeader.Font = Enum.Font.GothamBold
         accStatsHeader.TextSize = 14
         accStatsHeader.TextXAlignment = Enum.TextXAlignment.Left
@@ -2376,7 +2376,7 @@ local function CreateHUD()
         accItemsHeader.Position = UDim2.new(0.58, 0, 0, 98)
         accItemsHeader.BackgroundTransparency = 1
         accItemsHeader.Text = "Account Items"
-        accItemsHeader.TextColor3 = Color3.fromRGB(185, 120, 255)
+        accItemsHeader.TextColor3 = Color3.fromRGB(250, 195, 35)
         accItemsHeader.Font = Enum.Font.GothamBold
         accItemsHeader.TextSize = 14
         accItemsHeader.TextXAlignment = Enum.TextXAlignment.Left
