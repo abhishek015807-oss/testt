@@ -237,13 +237,12 @@ GetItemsMain = GetItemsMain or Main.CreatePage({ Page_Name = "Get and Upgrade It
 VolcanoTab = VolcanoTab or Main.CreatePage({ Page_Name = "Volcano Event", Page_Title = "Volcano Event Tab" })
 HalloweenTab = HalloweenTab or Main.CreatePage({ Page_Name = "Halloween Event", Page_Title = "Halloween Event Tab" })
 -----------------------------------------------------------------------------
--- HALLOWEEN EVENT (REVERSE-ENGINEERED FROM LIVE BLOX FRUITS RUNTIME)
+-- HALLOWEEN EVENT (ENGINE REWRITTEN FROM KAITUN HALLOWEEN DEOBFUSCATED)
 -----------------------------------------------------------------------------
-HalloweenTab = HalloweenTab or Main.CreatePage({ Page_Name = "Halloween Event", Page_Title = "Halloween Event Tab" })
 local HalloweenTrickSection = HalloweenTab.CreateSection("Trick or Treat (Doors)")
-local HalloweenPumpkinSection = HalloweenTab.CreateSection("Pumpkin Hunt & Candy")
+local HalloweenPumpkinSection = HalloweenTab.CreateSection("Pumpkin Hunt & Candy Spills")
 local HalloweenBossSection = HalloweenTab.CreateSection("Halloween Event Bosses")
-local HalloweenRitualSection = HalloweenTab.CreateSection("Ritual & Gacha")
+local HalloweenRitualSection = HalloweenTab.CreateSection("Ritual & Spooky Gacha")
 
 local HalloweenRemotes = {
 	Function = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 9):FindFirstChild("HalloweenFunction"),
@@ -252,112 +251,27 @@ local HalloweenRemotes = {
 	Ritual = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 9):FindFirstChild("DapperJackRitual")
 }
 
--- 1. Helper: Find Available Halloween Doors (Trick or Treat)
-local function GetAvailableHalloweenDoors()
-	local doors = {}
-	local serverTime = workspace:GetServerTimeNow()
-	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local myPos = hrp and hrp.Position or Vector3.zero
+-- State tables & trackers
+local HalloweenOwnDoor = nil
+local HalloweenOwnMobs = setmetatable({}, { __mode = "k" })
+local HalloweenTried = setmetatable({}, { __mode = "k" })
+local HalloweenGreedy = { Count = 0, LastAt = 0, SeenAt = 0 }
+local HalloweenTarotKnown = {}
+local HalloweenTarotArmed = false
+local HalloweenTarotPending = nil
+local HalloweenSpillSkips = {}
+local HalloweenPumpkinTrack = setmetatable({}, { __mode = "k" })
+local HalloweenDialogueState = { Key = nil, Since = 0, SeenAt = 0, HoldUntil = 0 }
 
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj.Name == "HalloweenDoor" and obj:IsA("Model") then
-			local prox = obj:FindFirstChild("Proximity") or obj:FindFirstChildWhichIsA("BasePart") or obj.PrimaryPart
-			local doorPos = (prox and prox.Position) or (obj:IsA("Model") and obj:GetPivot().Position) or Vector3.zero
-			local cooldown = obj:GetAttribute("CooldownUntil")
-
-			-- Check if door is off cooldown
-			if not cooldown or (typeof(cooldown) == "number" and serverTime >= cooldown) then
-				table.insert(doors, {
-					model = obj,
-					pos = doorPos,
-					dist = (doorPos - myPos).Magnitude
-				})
-			end
-		end
-	end
-
-	table.sort(doors, function(a, b) return a.dist < b.dist end)
-	return doors
+-- 1. Helper: Safe Character and HumanoidRootPart
+local function getChar()
+	return t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
 end
 
--- 2. Helper: Find Nearest Pumpkin in PumpkinHunt
-local function GetNearestPumpkin()
-	local folder = workspace:FindFirstChild("PumpkinHunt")
-	if not folder then return nil end
-	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local myPos = hrp and hrp.Position or Vector3.zero
-	local nearest, nearestDist = nil, math.huge
-
-	for _, p in ipairs(folder:GetChildren()) do
-		if (p.Name == "Pumpkin" or p.Name == "PumpkinPatch") and p:IsA("Model") then
-			local pos = p:GetPivot().Position
-			local dist = (pos - myPos).Magnitude
-			if dist < nearestDist then
-				nearestDist = dist
-				nearest = p
-			end
-		end
-	end
-	return nearest
+local function getRoot()
+	local char = getChar()
+	return char and char:FindFirstChild("HumanoidRootPart")
 end
-
--- 3. Helper: Find Halloween Event Bosses & Mobs
-local function GetHalloweenBoss(bossName)
-	local enemies = workspace:FindFirstChild("Enemies")
-	if not enemies then return nil end
-	for _, m in ipairs(enemies:GetChildren()) do
-		if m:IsA("Model") and IsMobAlive(m) then
-			if bossName then
-				if m.Name:lower():find(bossName:lower()) then
-					return m
-				end
-			else
-				local n = m.Name:lower()
-				if n:find("jack o' lantern") or n:find("pumpkin snowman") or n:find("dapper jack") or n:find("werewolf") or n:find("hellfire gas") then
-					return m
-				end
-			end
-		end
-	end
-	return nil
-end
-
--- 4. Helper: Find Candy Spill items
-local function GetCandySpillPieces()
-	local pieces = {}
-	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local myPos = hrp and hrp.Position or Vector3.zero
-
-	local tagged = game:GetService("CollectionService"):GetTagged("HalloweenCandySpill")
-	for _, obj in ipairs(tagged) do
-		local pos = obj:IsA("BasePart") and obj.Position or (obj:IsA("Model") and obj:GetPivot().Position or nil)
-		if pos then
-			table.insert(pieces, { obj = obj, pos = pos, dist = (pos - myPos).Magnitude })
-		end
-	end
-
-	for _, child in ipairs(workspace:GetChildren()) do
-		if child.Name:sub(1, 6) == "Candy_" or child.Name:sub(1, 6) == "Chest_" then
-			local pos = child:IsA("BasePart") and child.Position or (child:IsA("Model") and child:GetPivot().Position or nil)
-			if pos then
-				table.insert(pieces, { obj = child, pos = pos, dist = (pos - myPos).Magnitude })
-			end
-		end
-	end
-
-	table.sort(pieces, function(a, b) return a.dist < b.dist end)
-	return pieces
-end
-
------------------------------------------------------------------------------
--- SECTION 1: TRICK OR TREAT (DOORS) - ENGINE FROM TOPI HALLOWEEN
------------------------------------------------------------------------------
-local ttVisited = {}
-local ttIgnoreMob = setmetatable({}, { __mode = "k" })
-local TT_MOB_RANGE = 200
 
 local function isMobAliveSafe(m)
 	if typeof(IsMobAlive) == "function" then
@@ -379,180 +293,143 @@ local function attackMobSafe(mob)
 	end)
 end
 
--- 1. Find Trick or Treat enemy NPC / Boss spawned by doors
-local function findTrickMob()
-	local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local enemies = workspace:FindFirstChild("Enemies")
-	if not hrp or not enemies then return nil end
-
-	-- Priority: Hellfire Gas boss
-	local boss = enemies:FindFirstChild("Hellfire Gas")
-	if boss and isMobAliveSafe(boss) then
-		return boss
-	end
-
-	local best, bestD = nil, TT_MOB_RANGE
-	for _, m in ipairs(enemies:GetChildren()) do
-		if m:IsA("Model") and (ttIgnoreMob[m] or 0) < tick() and isMobAliveSafe(m) then
-			local n = m.Name:lower()
-			if not n:find("jack o' lantern") and not n:find("pumpkin snowman") then
-				local mHrp = m:FindFirstChild("HumanoidRootPart")
-				if mHrp then
-					local d = (mHrp.Position - hrp.Position).Magnitude
-					if d <= bestD then
-						best, bestD = m, d
-					end
-				end
-			end
+-- 2. Module Loaders: DialogueController & ConcentrationGame (Tarot)
+local DialogueController = nil
+local function GetDialogueController()
+	if DialogueController ~= nil then return DialogueController end
+	local ok, mod = pcall(function()
+		local inst = game:GetService("ReplicatedStorage"):FindFirstChild("DialogueController", true)
+		if inst and inst:IsA("ModuleScript") then
+			return require(inst)
 		end
-	end
-	return best
-end
-
--- 2. Farm / Kill spawned trick NPC
-local function farmTrickMob(mob)
-	if not mob or not mob.Parent then return end
-	local isBoss = mob.Name == "Hellfire Gas"
-	local startT = tick()
-	local timeout = isBoss and 90 or 35
-
-	while Settings["Auto Trick or Treat"] and isMobAliveSafe(mob) and (tick() - startT < timeout) do
-		task.wait(0.04)
-		local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		local mHrp = mob:FindFirstChild("HumanoidRootPart")
-		if not hrp or not mHrp then break end
-
-		if not isBoss and (mHrp.Position - hrp.Position).Magnitude > TT_MOB_RANGE + 40 then
-			break
-		end
-
-		pcall(function()
-			attackMobSafe(mob)
-			local fy = (Settings["Select Weapon"] == "Blox Fruit") and 15 or 20
-			toTarget(mHrp.CFrame * CFrame.new(0, fy, 0))
-		end)
-	end
-
-	if isMobAliveSafe(mob) and not isBoss then
-		ttIgnoreMob[mob] = tick() + 20
-	end
-end
-
--- 3. Check and chase GhostChase event models
-local function checkGhostChase()
-	local root = workspace:FindFirstChild("GhostChase")
-	if not root then return false end
-	local children = root:GetChildren()
-	if #children == 0 then return false end
-
-	local startT = tick()
-	while Settings["Auto Trick or Treat"] and (tick() - startT < 45) do
-		local ghosts = root:GetChildren()
-		if #ghosts == 0 then break end
-
-		local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if not hrp then break end
-
-		local nearestGhost, minD = nil, math.huge
-		for _, g in ipairs(ghosts) do
-			local gPos = g:IsA("Model") and g:GetPivot().Position or (g:IsA("BasePart") and g.Position)
-			if gPos then
-				local d = (gPos - hrp.Position).Magnitude
-				if d < minD then
-					minD = d
-					nearestGhost = g
-				end
-			end
-		end
-
-		if nearestGhost then
-			local gPos = nearestGhost:IsA("Model") and nearestGhost:GetPivot().Position or (nearestGhost:IsA("BasePart") and nearestGhost.Position)
-			if gPos then
-				toTarget(CFrame.new(gPos))
-				task.wait(0.12)
-			end
-		else
-			break
-		end
-	end
-	return true
-end
-
--- 4. Dialogue Detection (Both modern DialogueGui with scroller and classic Main.Dialogue)
-local function getDialogue()
-	local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
-	if not pg then return nil end
-
-	-- Modern Blox Fruits DialogueGui (optionsList -> scroller -> option1)
-	local dg = pg:FindFirstChild("DialogueGui")
-	if dg and (not dg:IsA("ScreenGui") or dg.Enabled) then
-		local fallbackSc
-		for _, ol in ipairs(dg:GetDescendants()) do
-			if ol.Name == "optionsList" then
-				local sc = ol:FindFirstChild("scroller")
-				if sc then
-					fallbackSc = fallbackSc or sc
-					for _, o in ipairs(sc:GetChildren()) do
-						if o:IsA("GuiObject") and string.find(string.lower(o.Name), "option1", 1, true)
-							and not string.find(string.lower(o.Name), "option1%d")
-							and o.Visible and o.AbsoluteSize.X > 0 and o.AbsoluteSize.Y > 0 then
-							return sc, o
-						end
-					end
-				end
-			end
-		end
-		if fallbackSc then return fallbackSc, nil end
-	end
-
-	-- Classic Main.Dialogue
-	local main = pg:FindFirstChild("Main") or pg:FindFirstChild("Main (minimal)")
-	local d = main and (main:FindFirstChild("Dialogue") or main:FindFirstChild("Dialog"))
-	if d and d.Visible then
-		local opt1 = d:FindFirstChild("Option1", true)
-		if opt1 and opt1.Visible then
-			return d, opt1
-		end
-		return d, nil
-	end
-
-	-- ScreenGui Dialogue Fallback
-	for _, gui in ipairs(pg:GetChildren()) do
-		if gui:IsA("ScreenGui") and gui.Enabled then
-			local d2 = gui:FindFirstChild("Dialogue") or gui:FindFirstChild("Dialog") or gui:FindFirstChild("NPCDialog")
-			if d2 and d2.Visible then
-				local opt1 = d2:FindFirstChild("Option1", true)
-				if opt1 and opt1.Visible then return d2, opt1 end
-				return d2, nil
-			end
-		end
-	end
-
-	return nil, nil
-end
-
-local function getDialogueFrame()
-	local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
-	if not pg then return nil end
-	local dg = pg:FindFirstChild("DialogueGui")
-	if dg and (not dg:IsA("ScreenGui") or dg.Enabled) then
-		for _, c in ipairs(dg:GetChildren()) do
-			if string.sub(c.Name, 1, 6) == "table:" and (not c:IsA("GuiObject") or c.Visible) then
-				return c
-			end
-		end
-	end
-	local main = pg:FindFirstChild("Main") or pg:FindFirstChild("Main (minimal)")
-	local d = main and (main:FindFirstChild("Dialogue") or main:FindFirstChild("Dialog"))
-	if d and d.Visible then
-		return d
+	end)
+	if ok and type(mod) == "table" then
+		DialogueController = mod
+		return DialogueController
 	end
 	return nil
 end
 
+local ConcentrationGame = nil
+local function GetTarotController()
+	if ConcentrationGame ~= nil then return ConcentrationGame end
+	local ok, mod = pcall(function()
+		local inst = game:GetService("ReplicatedStorage"):FindFirstChild("ConcentrationGame", true)
+		if inst and inst:IsA("ModuleScript") then
+			return require(inst)
+		end
+	end)
+	if ok and type(mod) == "table" then
+		ConcentrationGame = mod
+		return ConcentrationGame
+	end
+	return nil
+end
+
+-- 3. Boss Door Detection & Door Scoring
+local function isBossDoor(door)
+	if not door or not door.Parent then return false end
+	local ok, result = pcall(function()
+		if door:GetAttribute("WerewolfBossDoor") == true then return true end
+		if door:GetAttribute("BOSS_ACTIVE_SERVER") == true then return true end
+		local cs = game:GetService("CollectionService")
+		if cs:HasTag(door, "WerewolfBossDoor") or cs:HasTag(door, "HellfireBossDoor") then return true end
+		for _, child in ipairs(door:GetChildren()) do
+			if cs:HasTag(child, "WerewolfBossDoor") or cs:HasTag(child, "HellfireBossDoor") then return true end
+		end
+		for k, v in pairs(door:GetAttributes()) do
+			local name = tostring(k):lower()
+			if v == true and (name:find("bossdoor", 1, true) or name == "boss" or name == "isboss") then return true end
+		end
+		return false
+	end)
+	return ok and result == true
+end
+
+-- 4. Available Halloween Doors Discovery
+local function GetAvailableHalloweenDoors()
+	local doors = {}
+	local serverTime = workspace:GetServerTimeNow()
+	local root = getRoot()
+	local myPos = root and root.Position or Vector3.new(0, 0, 0)
+	local now = tick()
+
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj.Name == "HalloweenDoor" and obj:IsA("Model") then
+			local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+			if prompt and prompt.Parent and prompt.Enabled and obj:GetAttribute("DoorOpen") ~= true then
+				local cooldown = obj:GetAttribute("CooldownUntil")
+				if not cooldown or (typeof(cooldown) == "number" and serverTime >= cooldown) then
+					if not HalloweenTried[obj] or now >= HalloweenTried[obj] then
+						local doorCF = obj:GetPivot()
+						local dist = (doorCF.Position - myPos).Magnitude
+						local score = dist
+						if Settings["Halloween Boss Priority"] and isBossDoor(obj) then
+							score = score - 100000
+						end
+						table.insert(doors, {
+							model = obj,
+							prompt = prompt,
+							cframe = doorCF,
+							dist = dist,
+							score = score
+						})
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(doors, function(a, b) return a.score < b.score end)
+	return doors
+end
+
+-- 5. Outdoor Stand CFrame & Interaction
+local function getStandCFrame(door, root)
+	local doorCF = (door:IsA("Model") and door:GetPivot()) or (door:IsA("BasePart") and door.CFrame)
+	if not doorCF then return nil end
+	local look = doorCF.LookVector
+	local flatLook = Vector3.new(look.X, 0, look.Z)
+	flatLook = flatLook.Magnitude > 0.1 and flatLook.Unit or Vector3.new(0, 0, 1)
+	local pos1 = doorCF.Position + flatLook * 3.5
+	local pos2 = doorCF.Position - flatLook * 3.5
+	local standPos = pos1
+	if root then
+		local d1 = (pos1 - root.Position).Magnitude
+		local d2 = (pos2 - root.Position).Magnitude
+		if d2 < d1 then standPos = pos2 end
+	end
+	return CFrame.lookAt(standPos, doorCF.Position)
+end
+
+local function pressDoor(door, prompt)
+	if not door or not prompt then return end
+	local hold = prompt.HoldDuration or 0
+	pcall(function() prompt.RequiresLineOfSight = false end)
+	if typeof(fireproximityprompt) == "function" and prompt.Enabled then
+		pcall(fireproximityprompt, prompt, hold > 0 and (hold + 0.1) or 1)
+	end
+	pcall(function()
+		local vim = game:GetService("VirtualInputManager")
+		if vim then
+			vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+			task.wait(0.05 + hold)
+			vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+		end
+	end)
+	if HalloweenRemotes.Function then
+		pcall(function() HalloweenRemotes.Function:InvokeServer(door) end)
+	end
+	if HalloweenRemotes.Event then
+		pcall(function() HalloweenRemotes.Event:FireServer("TrickOrTreat", door) end)
+	end
+	local commF = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 3):FindFirstChild("CommF_")
+	if commF then
+		pcall(function() commF:InvokeServer("HalloweenDoor", door) end)
+	end
+end
+
+-- 6. GUI Interaction Helpers
 local function doClickScreen()
 	pcall(function()
 		local vim = game:GetService("VirtualInputManager")
@@ -595,60 +472,655 @@ local function clickGui(o)
 	return clicked
 end
 
--- 5. Safe Door Standing Position (Outdoors in front of the door)
-local function getStandCFrame(door, hrp)
-	local doorCF = (door:IsA("Model") and door:GetPivot()) or (door:IsA("BasePart") and door.CFrame)
-	if not doorCF then return nil end
-	local look = doorCF.LookVector
-	local flatLook = Vector3.new(look.X, 0, look.Z)
-	flatLook = flatLook.Magnitude > 0.1 and flatLook.Unit or Vector3.new(0, 0, 1)
-	local pos1 = doorCF.Position + flatLook * 3.5
-	local pos2 = doorCF.Position - flatLook * 3.5
-	local standPos = pos1
-	if hrp then
-		local d1 = (pos1 - hrp.Position).Magnitude
-		local d2 = (pos2 - hrp.Position).Magnitude
-		if d2 < d1 then standPos = pos2 end
+-- 7. Sweeping Candy Spills from Map & CollectionService
+local function SweepCandySpill(maxDist)
+	local cs = game:GetService("CollectionService")
+	local folders = cs:GetTagged("HalloweenCandySpill")
+	local root = getRoot()
+	if not root then return end
+	local limit = maxDist or 600
+
+	for _, folder in ipairs(folders) do
+		pcall(function()
+			for k, val in pairs(folder:GetAttributes()) do
+				if typeof(val) == "Vector3" and type(k) == "string" then
+					local isCandy = k:sub(1, 6) == "Candy_" or k:sub(1, 6) == "Chest_"
+					if isCandy then
+						local d = (val - root.Position).Magnitude
+						if d <= limit then
+							toTarget(CFrame.new(val + Vector3.new(0, 3, 0)))
+							local pieceId = tonumber(k:match("(%d+)"))
+							if pieceId and HalloweenRemotes.Event then
+								HalloweenRemotes.Event:FireServer("CandySpillClaim", pieceId)
+							end
+							task.wait(0.08)
+						end
+					end
+				end
+			end
+		end)
 	end
-	return CFrame.lookAt(standPos, doorCF.Position)
 end
 
--- 6. Trigger Door Prompt & KeyCode.E
-local function pressE(door)
-	local prompt = door and door:FindFirstChildWhichIsA("ProximityPrompt", true)
-	local hold = prompt and prompt.HoldDuration or 0
-	if prompt then
-		pcall(function() prompt.RequiresLineOfSight = false end)
-		if fireproximityprompt and prompt.Enabled then
-			pcall(fireproximityprompt, prompt, hold > 0 and (hold + 0.1) or 1)
+-- 8. Enemy Ownership & Trick Mob Targeting
+local function HalloweenOwnEnemy(mob)
+	if not mob or not mob.Parent or not isMobAliveSafe(mob) then return false end
+	if HalloweenOwnMobs[mob] then return true end
+
+	local myName = game.Players.LocalPlayer and game.Players.LocalPlayer.Name
+	local owner = mob:GetAttribute("LocalEnemy")
+	if owner ~= nil and owner ~= myName then return false end
+
+	local lower = mob.Name:lower()
+	if lower == "hellfire gas" or lower == "dapper jack" or lower == "werewolf" then
+		HalloweenOwnMobs[mob] = true
+		return true
+	end
+
+	local mHrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+	if not mHrp then return false end
+
+	-- Check if mob spawned at our current knocked door!
+	local own = HalloweenOwnDoor
+	if own and own.Door and own.Door.Parent and (tick() - own.At <= 75) then
+		if not (own.Ignore and own.Ignore[mob]) then
+			local doorCF = (own.Door:IsA("Model") and own.Door:GetPivot()) or (own.Door:IsA("BasePart") and own.Door.CFrame)
+			if doorCF and (mHrp.Position - doorCF.Position).Magnitude <= 100 then
+				HalloweenOwnMobs[mob] = true
+				return true
+			end
 		end
 	end
+
+	if owner == myName then
+		HalloweenOwnMobs[mob] = true
+		return true
+	end
+
+	return false
+end
+
+local function findTrickMob()
+	local root = getRoot()
+	local enemies = workspace:FindFirstChild("Enemies")
+	if not root or not enemies then return nil end
+
+	-- Priority: Hellfire Gas or other major event boss
+	local boss = enemies:FindFirstChild("Hellfire Gas") or enemies:FindFirstChild("Dapper Jack") or enemies:FindFirstChild("Werewolf")
+	if boss and isMobAliveSafe(boss) then
+		return boss
+	end
+
+	local best, bestD = nil, 200
+	for _, m in ipairs(enemies:GetChildren()) do
+		if m:IsA("Model") and isMobAliveSafe(m) and HalloweenOwnEnemy(m) then
+			local mHrp = m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart
+			if mHrp then
+				local d = (mHrp.Position - root.Position).Magnitude
+				if d <= bestD then
+					best = m
+					bestD = d
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function farmTrickMob(mob)
+	if not mob or not mob.Parent then return end
+	local isBoss = mob.Name == "Hellfire Gas" or mob.Name == "Dapper Jack" or mob.Name == "Werewolf"
+	local startT = tick()
+	local timeout = isBoss and 90 or 35
+
+	while isMobAliveSafe(mob) and (tick() - startT < timeout) do
+		task.wait(0.04)
+		local root = getRoot()
+		local mHrp = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+		if not root or not mHrp then break end
+
+		if not isBoss and (mHrp.Position - root.Position).Magnitude > 240 then
+			break
+		end
+
+		pcall(function()
+			attackMobSafe(mob)
+			local fy = (Settings["Select Weapon"] == "Blox Fruit") and 15 or 20
+			toTarget(mHrp.CFrame * CFrame.new(0, fy, 0))
+		end)
+	end
+
+	-- Sweep dropped candy corn immediately after killing mob!
 	pcall(function()
-		local vim = game:GetService("VirtualInputManager")
-		vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-		task.wait(0.05 + hold)
-		vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+		SweepCandySpill(40)
 	end)
-	if HalloweenRemotes.Function then
-		pcall(function() HalloweenRemotes.Function:InvokeServer(door) end)
+end
+
+-- 9. Text Cleaner & Option Finders
+local function cleanDialogueText(str)
+	if type(str) ~= "string" then return "" end
+	local text = str:gsub("<[^>]+>", "")
+	return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function findOptionExact(options, targetLabel)
+	local want = targetLabel:lower()
+	for _, opt in ipairs(options) do
+		if opt.Lower == want then return opt end
 	end
-	if HalloweenRemotes.Event then
-		pcall(function() HalloweenRemotes.Event:FireServer("TrickOrTreat", door) end)
+	return nil
+end
+
+local function findOptionPart(options, substring)
+	local want = substring:lower()
+	for _, opt in ipairs(options) do
+		if opt.Lower:find(want, 1, true) then return opt end
 	end
-	if CommF then
-		pcall(function() CommF:InvokeServer("HalloweenDoor", door) end)
+	return nil
+end
+
+-- 10. Dialogue Choice Engine (Greedy grabs, safe choices, avoid traps)
+local function HalloweenEventChoice(options, text)
+	local lowerText = (text or ""):lower()
+	local nevermind = findOptionExact(options, "Nevermind")
+
+	-- Suizei & Death (triple/double enemies)
+	local death = findOptionExact(options, "Give to Death")
+	local suizei = findOptionExact(options, "Give to Suizei")
+	if death or suizei then
+		local parlus = Settings["Halloween parlus"]
+		if parlus == "Give to Suizei (triple enemies)" and suizei then return suizei end
+		if parlus == "Give to Death (double enemies)" and death then return death end
+		return "close"
+	end
+
+	-- Greedy Candy Grabs (Up to configured grabs, default 4!)
+	local grab = findOptionExact(options, "Grab a handful") or findOptionExact(options, "Grab another handful")
+	local leave = grab and findOptionPart(options, "leave") or nil
+	if grab and leave then
+		local tracker = HalloweenGreedy
+		if not tracker or (tick() - (tracker.SeenAt or 0) > 30) then
+			tracker = { Count = 0, LastAt = 0, SeenAt = tick() }
+			HalloweenGreedy = tracker
+		end
+		tracker.SeenAt = tick()
+		if tracker.Count == 0 and grab.Lower == "grab another handful" then
+			local amount = tonumber(leave.Label:match("(%d+)")) or 15
+			tracker.Count = math.clamp(math.floor(amount / 15 + 0.5), 1, 9)
+		end
+		local want = tonumber(Settings["Halloween Greedy Grabs"]) or 4
+		if tracker.Count < want then
+			if (tick() - tracker.LastAt) < 1.35 then return "wait" end
+			tracker.Count = tracker.Count + 1
+			tracker.LastAt = tick()
+			return grab
+		end
+		tracker.Count = 0
+		return leave
+	end
+
+	-- Just the candy, please vs One free roll! (Avoid troll bomb trap)
+	local candyOpt = findOptionExact(options, "Just the candy, please")
+	local rollOpt = findOptionExact(options, "One free roll!")
+	if candyOpt and rollOpt then
+		return candyOpt
+	end
+
+	-- Fruit Dealer
+	local begOpt = findOptionPart(options, "can you spare any")
+	local robFruit = findOptionExact(options, "Give me those fruits!")
+	if begOpt and robFruit then
+		return begOpt
+	end
+
+	-- Sweet Ride (Fix car vs Rob)
+	local helpOpt = findOptionExact(options, "Help fix the car")
+	local robCar = findOptionExact(options, "Hand over the candy you stole")
+	if helpOpt and robCar then
+		return helpOpt
+	end
+
+	-- Tarot mini-game
+	local playOpt = findOptionExact(options, "Play matching!")
+	if playOpt and nevermind then
+		HalloweenTarotArmed = true
+		HalloweenTarotKnown = {}
+		return playOpt
+	end
+
+	-- Mystery Hall quiz
+	local inOpt = findOptionExact(options, "I'm in!")
+	if inOpt and nevermind then
+		return inOpt
+	end
+
+	-- Graves (random grave)
+	local graves = {}
+	for _, entry in ipairs(options) do
+		if entry.Lower:sub(1, 6) == "grave " then table.insert(graves, entry) end
+	end
+	if #graves > 0 then return graves[math.random(1, #graves)] end
+
+	-- Focus power
+	local focusOpt = findOptionExact(options, "Focus more power!")
+	if focusOpt then return focusOpt end
+
+	-- Blessings
+	local celestial = findOptionExact(options, "Celestial (Right)")
+	local oni = findOptionExact(options, "Oni (Left)")
+	if celestial and oni then
+		return oni or celestial
+	end
+
+	return nil
+end
+
+-- 11. Master Dialogue Execution Step
+local function StepHalloweenDialogue()
+	local ctrl = GetDialogueController()
+	local activeState, page = nil, nil
+	if ctrl and type(ctrl.getActiveDialogue) == "function" then
+		local ok, state = pcall(ctrl.getActiveDialogue)
+		if ok and state then
+			activeState = state
+			page = state
+			pcall(function()
+				if type(state.getCurrent) == "function" then
+					page = state:getCurrent() or state
+				end
+			end)
+		end
+	end
+
+	if ctrl and activeState and page then
+		-- Extract options from DialogueController
+		local rawOpts = type(page) == "table" and page._options or nil
+		local options = {}
+		if type(rawOpts) == "table" then
+			for idx, opt in ipairs(rawOpts) do
+				local label, locked, kind = "", false, nil
+				pcall(function()
+					if type(opt) == "string" then
+						label = opt
+					elseif type(opt) == "table" then
+						local txt = opt._text
+						if type(txt) == "table" then label = tostring(txt[1] or "")
+						elseif type(txt) == "string" then label = txt end
+						if label == "" then label = tostring(opt.Label or opt.label or opt.Text or opt.text or "") end
+						locked = opt._locked == true
+						kind = opt._optionType
+					end
+				end)
+				label = cleanDialogueText(tostring(label or ""))
+				if label ~= "" and not locked then
+					table.insert(options, { Option = opt, Index = idx, Label = label, Lower = label:lower(), Type = kind })
+				end
+			end
+		end
+
+		-- Extract text
+		local parts = {}
+		local sources = type(page) == "table" and page._textSources or nil
+		if type(sources) == "table" then
+			for _, txt in ipairs(sources) do
+				local c = cleanDialogueText(tostring(txt or ""))
+				if c ~= "" then table.insert(parts, c) end
+			end
+		end
+		local text = table.concat(parts, " ")
+
+		local visible = true
+		pcall(function()
+			if type(page.areOptionsVisible) == "function" then visible = page:areOptionsVisible() == true end
+		end)
+
+		if visible and #options > 0 then
+			local choice = HalloweenEventChoice(options, text)
+			if choice == "close" then
+				pcall(ctrl.close)
+				return true
+			elseif choice == "wait" then
+				return true
+			elseif type(choice) == "table" and choice.Option then
+				pcall(ctrl.select, choice.Option)
+				return true
+			end
+
+			-- Safe words check
+			local blocked = { "double", "triple", "scam", "give me your", "give to", "trade your", "sacrifice", "robux", "pay", "buy" }
+			local wanted = { "trick or treat", "stop", "accept", "teleport", "happy halloween", "yeah", "yes", "ok", "treat", "continue" }
+			local safe = {}
+			for _, entry in ipairs(options) do
+				local bad = false
+				for _, w in ipairs(blocked) do
+					if entry.Lower:find(w, 1, true) then bad = true; break end
+				end
+				if not bad then table.insert(safe, entry) end
+			end
+
+			for _, w in ipairs(wanted) do
+				for _, entry in ipairs(safe) do
+					if entry.Lower:find(w, 1, true) then
+						pcall(ctrl.select, entry.Option)
+						return true
+					end
+				end
+			end
+
+			for _, entry in ipairs(safe) do
+				if entry.Type == "Accept" then
+					pcall(ctrl.select, entry.Option)
+					return true
+				end
+			end
+
+			if #safe == 1 and safe[1].Type ~= "Purchase" then
+				pcall(ctrl.select, safe[1].Option)
+				return true
+			end
+			return true
+		end
+
+		-- Advance text if no options
+		pcall(ctrl.advance)
+		return true
+	end
+
+	-- GUI Fallback handler
+	local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+	if not pg then return false end
+
+	local dg = pg:FindFirstChild("DialogueGui")
+	if dg and (not dg:IsA("ScreenGui") or dg.Enabled) then
+		for _, ol in ipairs(dg:GetDescendants()) do
+			if ol.Name == "optionsList" then
+				local sc = ol:FindFirstChild("scroller")
+				if sc then
+					for _, o in ipairs(sc:GetChildren()) do
+						if o:IsA("GuiObject") and o.Visible and o.AbsoluteSize.X > 0 and o.AbsoluteSize.Y > 0 then
+							clickGui(o)
+							return true
+						end
+					end
+				end
+			end
+		end
+		doClickScreen()
+		return true
+	end
+
+	local main = pg:FindFirstChild("Main") or pg:FindFirstChild("Main (minimal)")
+	local d = main and (main:FindFirstChild("Dialogue") or main:FindFirstChild("Dialog"))
+	if d and d.Visible then
+		local opt1 = d:FindFirstChild("Option1", true)
+		if opt1 and opt1.Visible then
+			clickGui(opt1)
+		else
+			doClickScreen()
+		end
+		return true
+	end
+
+	return false
+end
+
+-- 12. Tarot Card Matching Solver
+local function StepTarotSolver()
+	if not Settings["Auto Tarot Solver"] then return false end
+	local cg = GetTarotController()
+	local open, board = false, nil
+	if cg then
+		pcall(function()
+			if type(cg.IsOpen) == "function" then open = cg:IsOpen() == true
+			else open = cg._IsOpen == true end
+		end)
+		pcall(function() board = cg._ServerBoard end)
+		if type(board) ~= "table" or type(board.Cells) ~= "table" then
+			pcall(function()
+				if type(cg.GetBoard) == "function" then board = cg:GetBoard() end
+			end)
+		end
+	end
+
+	local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+	local rootGui = pg and pg:FindFirstChild("ConcentrationGameRoot")
+	if not open and not rootGui then
+		HalloweenTarotArmed = false
+		return false
+	end
+
+	if type(board) ~= "table" or type(board.Cells) ~= "table" then
+		return true
+	end
+
+	local known = HalloweenTarotKnown
+	local revealed, unmatched = {}, {}
+	for idx, cell in ipairs(board.Cells) do
+		if type(cell) == "table" then
+			if cell.Id ~= nil and cell.State ~= "Hidden" then known[idx] = cell.Id end
+			if cell.State == "Revealed" then table.insert(revealed, idx) end
+			if cell.State ~= "Matched" then table.insert(unmatched, idx) end
+		end
+	end
+
+	if #unmatched == 0 then
+		HalloweenTarotPending = nil
+		return true
+	end
+
+	local function isRev(i)
+		for _, v in ipairs(revealed) do if v == i then return true end end
+		return false
+	end
+
+	local target = nil
+	if #revealed == 1 then
+		local id = known[revealed[1]]
+		if id ~= nil then
+			for _, i in ipairs(unmatched) do
+				if i ~= revealed[1] and known[i] == id then target = i; break end
+			end
+		end
+	else
+		local seen = {}
+		for _, i in ipairs(unmatched) do
+			local id = known[i]
+			if id ~= nil and not isRev(i) then
+				if seen[id] then target = seen[id]; break end
+				seen[id] = i
+			end
+		end
+	end
+
+	if not target then
+		for _, i in ipairs(unmatched) do
+			if known[i] == nil and not isRev(i) then target = i; break end
+		end
+	end
+	if not target then
+		for _, i in ipairs(unmatched) do
+			if not isRev(i) then target = i; break end
+		end
+	end
+
+	if not target then return true end
+
+	local button = nil
+	if rootGui then
+		for _, o in ipairs(rootGui:GetDescendants()) do
+			if o:IsA("GuiButton") and o.Visible then
+				local n = tonumber(o.Name:match("(%d+)"))
+				if n == target then button = o; break end
+			end
+		end
+	end
+
+	if button then
+		clickGui(button)
+		task.wait(0.35)
+	end
+	return true
+end
+
+-- 13. Break Free / Abyss Chain Struggle Solver
+local function StepBreakFree()
+	if not Settings["Auto Break Free"] then return false end
+	local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+	if not pg then return false end
+	local struggle = pg:FindFirstChild("AbyssChainStruggle") or pg:FindFirstChild("StruggleGui")
+	if struggle and (not struggle:IsA("ScreenGui") or struggle.Enabled) then
+		local vim = game:GetService("VirtualInputManager")
+		if vim then
+			pcall(function()
+				vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+				task.wait(0.03)
+				vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+			end)
+		end
+		return true
+	end
+	return false
+end
+
+-- 14. Ghost Chase Handler
+local function checkGhostChase()
+	local root = workspace:FindFirstChild("GhostChase")
+	if not root then return false end
+	local children = root:GetChildren()
+	if #children == 0 then return false end
+
+	local startT = tick()
+	while Settings["Auto Trick or Treat"] and (tick() - startT < 45) do
+		local ghosts = root:GetChildren()
+		if #ghosts == 0 then break end
+
+		local myHrp = getRoot()
+		if not myHrp then break end
+
+		local nearestGhost, minD = nil, math.huge
+		for _, g in ipairs(ghosts) do
+			local gPos = g:IsA("Model") and g:GetPivot().Position or (g:IsA("BasePart") and g.Position)
+			if gPos then
+				local d = (gPos - myHrp.Position).Magnitude
+				if d < minD then
+					minD = d
+					nearestGhost = g
+				end
+			end
+		end
+
+		if nearestGhost then
+			local gPos = nearestGhost:IsA("Model") and nearestGhost:GetPivot().Position or (nearestGhost:IsA("BasePart") and nearestGhost.Position)
+			if gPos then
+				toTarget(CFrame.new(gPos))
+				task.wait(0.12)
+			end
+		else
+			break
+		end
+	end
+	return true
+end
+
+-- 15. Pumpkin Hunt & Rare Patches
+local function StepPumpkinHunt()
+	local folder = workspace:FindFirstChild("PumpkinHunt")
+	if not folder then return false end
+	local root = getRoot()
+	if not root then return false end
+
+	local best, bestPos, bestDist, bestPatch = nil, nil, math.huge, false
+	for _, m in ipairs(folder:GetChildren()) do
+		if m:IsA("Model") then
+			local isPatch = m.Name == "PumpkinPatch" or m:GetAttribute("PumpkinRare") == true
+			local state = m:GetAttribute("PumpkinState")
+			if state == "Idle" or (isPatch and state == nil) then
+				local cf = m:GetPivot()
+				local d = (root.Position - cf.Position).Magnitude
+				if d <= 1200 then
+					local better = (best == nil) or (isPatch and not bestPatch) or (isPatch == bestPatch and d < bestDist)
+					if better then
+						best = m
+						bestPos = cf.Position
+						bestDist = d
+						bestPatch = isPatch
+					end
+				end
+			end
+		end
+	end
+
+	if not best then return false end
+
+	toTarget(CFrame.new(bestPos + Vector3.new(0, 3, 0)))
+	attackMobSafe(best)
+	task.wait(0.1)
+	return true
+end
+
+-- 16. Event Boss Finder
+local function GetHalloweenBoss(bossName)
+	local enemies = workspace:FindFirstChild("Enemies")
+	if not enemies then return nil end
+	for _, m in ipairs(enemies:GetChildren()) do
+		if m:IsA("Model") and isMobAliveSafe(m) then
+			if bossName then
+				if m.Name:lower():find(bossName:lower()) then
+					return m
+				end
+			else
+				local n = m.Name:lower()
+				if n:find("jack o' lantern") or n:find("pumpkin snowman") or n:find("dapper jack") or n:find("werewolf") or n:find("hellfire gas") then
+					return m
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- 17. Spooky Gacha Handler
+local function StepSpookyGacha()
+	if not Settings["Auto Roll Halloween Gacha"] then return false end
+	local netRF = game:GetService("ReplicatedStorage"):FindFirstChild("Modules", true)
+	local gachaRF = netRF and netRF:FindFirstChild("RF") and netRF.RF:FindFirstChild("GachaNetworkRF")
+	if gachaRF and gachaRF:IsA("RemoteFunction") then
+		pcall(function()
+			gachaRF:InvokeServer({ Context = "Purchase", BoxName = "SpookyBox" })
+		end)
+	elseif HalloweenRemotes.Function then
+		pcall(function()
+			HalloweenRemotes.Function:InvokeServer("RollGacha")
+		end)
 	end
 end
 
+-----------------------------------------------------------------------------
+-- UI CONTROLS & EVENT LOOPS
+-----------------------------------------------------------------------------
+
+-- SECTION 1: TRICK OR TREAT (DOORS)
 HalloweenTrickSection.CreateToggle(
-	{ Title = "Auto Trick or Treat", Desc = "Knocks on Halloween doors, handles Trick or Treat dialogue, and fights spawned trick NPCs", Default = Settings["Auto Trick or Treat"] or false },
+	{ Title = "Auto Trick or Treat", Desc = "Knocks doors, executes Kaitun dialogue engine, auto-solves Tarot, breaks chains, and defends against trick NPCs", Default = Settings["Auto Trick or Treat"] or false },
 	function(v)
 		SaveSettings("Auto Trick or Treat", v)
 		if v then
 			task.spawn(function()
-				while Settings["Auto Trick or Treat"] and task.wait(0.15) do
+				while Settings["Auto Trick or Treat"] and task.wait(0.12) do
 					pcall(function()
-						-- Priority 1: Check if any trick mob is nearby or Hellfire Gas is active; destroy it first!
+						-- Priority 1: Break free from chains / struggle
+						if StepBreakFree() then
+							task.wait(0.05)
+							return
+						end
+
+						-- Priority 2: Tarot solver if game active
+						if StepTarotSolver() then
+							task.wait(0.1)
+							return
+						end
+
+						-- Priority 3: Defend against trick NPCs or Hellfire Gas
 						local activeMob = findTrickMob()
 						if activeMob then
 							StackFarm = false
@@ -658,23 +1130,21 @@ HalloweenTrickSection.CreateToggle(
 							return
 						end
 
-						-- Priority 2: Check GhostChase mini-game
+						-- Priority 4: Ghost Chase mini-game
 						if checkGhostChase() then
 							task.wait(0.1)
 							return
 						end
 
-						-- Priority 3: Find nearest available HalloweenDoor not visited recently
-						local doors = GetAvailableHalloweenDoors()
-						local target = nil
-						for _, dInfo in ipairs(doors) do
-							if (ttVisited[dInfo.model] or 0) < tick() then
-								target = dInfo
-								break
-							end
+						-- Priority 5: Active Dialogue Handling
+						if StepHalloweenDialogue() then
+							task.wait(0.15)
+							return
 						end
 
-						if not target then
+						-- Priority 6: Find best available HalloweenDoor
+						local doors = GetAvailableHalloweenDoors()
+						if #doors == 0 then
 							if Settings["Hop Server When No Doors"] then
 								HopServer()
 								task.wait(5)
@@ -683,20 +1153,19 @@ HalloweenTrickSection.CreateToggle(
 							return
 						end
 
+						local target = doors[1]
 						StackFarm = false
 						StackFarmOther = false
 
-						-- Travel to door and WAIT until arrived (within 12 studs of stand CFrame)
-						local char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-						local hrp = char and char:FindFirstChild("HumanoidRootPart")
-						local standCF = getStandCFrame(target.model, hrp) or CFrame.new(target.pos) * CFrame.new(0, 2, 3.5)
+						-- Travel to door
+						local root = getRoot()
+						local standCF = getStandCFrame(target.model, root) or target.cframe * CFrame.new(0, 2, 3.5)
 
 						local moveStart = tick()
-						while Settings["Auto Trick or Treat"] and hrp and (hrp.Position - standCF.Position).Magnitude > 12 and (tick() - moveStart < 9) do
+						while Settings["Auto Trick or Treat"] and root and (root.Position - standCF.Position).Magnitude > 12 and (tick() - moveStart < 9) do
 							toTarget(standCF)
 							task.wait(0.1)
-							char = t.Character or (game.Players.LocalPlayer and game.Players.LocalPlayer.Character)
-							hrp = char and char:FindFirstChild("HumanoidRootPart")
+							root = getRoot()
 						end
 
 						if not Settings["Auto Trick or Treat"] then return end
@@ -705,92 +1174,94 @@ HalloweenTrickSection.CreateToggle(
 						toTarget(standCF)
 						task.wait(0.15)
 
-						-- Knock on door / trigger prompt + KeyCode.E
-						pressE(target.model)
+						-- Cache existing nearby enemies to ignore them (identifies new spawns accurately!)
+						local ignore = setmetatable({}, { __mode = "k" })
+						local enemiesFolder = workspace:FindFirstChild("Enemies")
+						if enemiesFolder then
+							for _, model in ipairs(enemiesFolder:GetChildren()) do
+								local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+								if part and (part.Position - target.cframe.Position).Magnitude <= 130 then
+									ignore[model] = true
+								end
+							end
+						end
+						HalloweenOwnDoor = { Door = target.model, At = tick(), Ignore = ignore }
 
-						-- Active Interaction Loop: Handles Dialogue and attacks any spawned trick NPC
+						-- Knock on door / trigger prompt + E
+						pressDoor(target.model, target.prompt)
+
+						-- Interaction wait loop: handles dialogue choices & mob spawning
 						local interactStart = tick()
-						local sawDialogue = false
 						local lastE = tick()
-						local lastClick = 0
-
 						while Settings["Auto Trick or Treat"] and (tick() - interactStart < 6.5) do
 							task.wait(0.08)
 
-							-- Check if an enemy NPC spawned from the door!
+							if StepBreakFree() or StepTarotSolver() then
+								break
+							end
+
 							local spawnedMob = findTrickMob()
 							if spawnedMob then
 								farmTrickMob(spawnedMob)
 								break
 							end
 
-							-- Check if door entered server cooldown (reward registered)
 							local cd = target.model:GetAttribute("CooldownUntil")
 							local sTime = workspace:GetServerTimeNow()
 							if typeof(cd) == "number" and cd > sTime then
 								break
 							end
 
-							-- Handle dialogue options / typewriter text
-							local sc, opt = getDialogue()
-							if opt then
-								sawDialogue = true
-								if tick() - lastClick >= 0.25 then
-									lastClick = tick()
-									clickGui(opt)
-								end
-							elseif getDialogueFrame() then
-								sawDialogue = true
-								if tick() - lastClick >= 0.25 then
-									lastClick = tick()
-									doClickScreen()
-								end
-							elseif sc then
-								sawDialogue = true
-								clickGui(sc)
+							if StepHalloweenDialogue() then
+								-- Dialogue responded, keep cycling choices
 							else
-								if sawDialogue then
-									task.wait(0.3)
-									-- Check if mob spawned as result of dialogue completion
-									local postMob = findTrickMob()
-									if postMob then
-										farmTrickMob(postMob)
-									end
-									break
-								end
-
-								-- Re-press E if dialogue hasn't opened yet after 1.2s
 								if tick() - lastE >= 1.2 then
-									pressE(target.model)
+									pressDoor(target.model, target.prompt)
 									lastE = tick()
 								end
 							end
 						end
 
-						-- Sweep any Candy Corn or chests dropped immediately around the door
+						-- Sweep dropped candy corn around door
 						pcall(function()
-							local spills = GetCandySpillPieces()
-							for _, piece in ipairs(spills) do
-								if piece.dist <= 40 and piece.obj and piece.obj.Parent then
-									toTarget(CFrame.new(piece.pos))
-									if HalloweenRemotes.Event then
-										local pieceId = tonumber(piece.obj.Name:match("Candy_(%d+)")) or tonumber(piece.obj.Name:match("Chest_.*_(%d+)"))
-										if pieceId then
-											HalloweenRemotes.Event:FireServer("CandySpillClaim", pieceId)
-										end
-									end
-									task.wait(0.08)
-								end
-							end
+							SweepCandySpill(45)
 						end)
 
-						-- Mark door visited so we don't spam it
-						ttVisited[target.model] = tick() + 120
+						-- Set retry cooldown
+						HalloweenTried[target.model] = tick() + 60
 						task.wait(0.2)
 					end)
 				end
 			end)
 		end
+	end
+)
+
+HalloweenTrickSection.CreateDropdown(
+	{ Title = "Greedy Candy Grabs", Desc = "Number of greedy candy grabs before leaving (1 - 4). Blox Fruits max is 4!", Options = { "1", "2", "3", "4" }, Default = tostring(Settings["Halloween Greedy Grabs"] or "4") },
+	function(v)
+		SaveSettings("Halloween Greedy Grabs", tonumber(v) or 4)
+	end
+)
+
+HalloweenTrickSection.CreateToggle(
+	{ Title = "Boss Door Priority", Desc = "Prioritizes Werewolf and Hellfire Gas boss doors over standard doors", Default = Settings["Halloween Boss Priority"] or true },
+	function(v)
+		SaveSettings("Halloween Boss Priority", v)
+	end
+)
+
+HalloweenTrickSection.CreateToggle(
+	{ Title = "Auto Tarot Solver", Desc = "Auto-solves the Concentration card matching memory game using live board reflection", Default = Settings["Auto Tarot Solver"] or true },
+	function(v)
+		SaveSettings("Auto Tarot Solver", v)
+	end
+)
+
+HalloweenTrickSection.CreateToggle(
+	{ Title = "Auto Break Free", Desc = "Auto-struggles at 20 Hz to instantly break free from Abyss chains & grab traps", Default = Settings["Auto Break Free"] or true },
+	function(v)
+		SaveSettings("Auto Break Free", v)
 	end
 )
 
@@ -801,27 +1272,18 @@ HalloweenTrickSection.CreateToggle(
 	end
 )
 
------------------------------------------------------------------------------
--- SECTION 2: PUMPKIN HUNT & CANDY SPILL
------------------------------------------------------------------------------
+-- SECTION 2: PUMPKIN HUNT & CANDY SPILLS
 HalloweenPumpkinSection.CreateToggle(
-	{ Title = "Auto Pumpkin Hunt", Desc = "Locates and punches pumpkins 3 times to break them and collect event drops", Default = Settings["Auto Pumpkin Hunt"] or false },
+	{ Title = "Auto Pumpkin Hunt", Desc = "Locates and punches pumpkins 3 times to break them and collect drops", Default = Settings["Auto Pumpkin Hunt"] or false },
 	function(v)
 		SaveSettings("Auto Pumpkin Hunt", v)
 		if v then
 			task.spawn(function()
 				while Settings["Auto Pumpkin Hunt"] and task.wait(0.2) do
 					pcall(function()
-						local pumpkin = GetNearestPumpkin()
-						if pumpkin and pumpkin.Parent then
-							StackFarm = false
-							StackFarmOther = false
-							local root = pumpkin:FindFirstChild("RootPart") or pumpkin.PrimaryPart or pumpkin:FindFirstChildWhichIsA("BasePart")
-							local targetCF = root and root.CFrame or pumpkin:GetPivot()
-							toTarget(targetCF * CFrame.new(0, 3, 0))
-							if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
-							ClickM1(pumpkin)
-						end
+						StackFarm = false
+						StackFarmOther = false
+						StepPumpkinHunt()
 					end)
 				end
 			end)
@@ -830,26 +1292,37 @@ HalloweenPumpkinSection.CreateToggle(
 )
 
 HalloweenPumpkinSection.CreateToggle(
-	{ Title = "Auto Collect Candy Corn / Spill", Desc = "Sweeps and claims dropped Candy Corn and chests on the map", Default = Settings["Auto Collect Candy Corn"] or false },
+	{ Title = "Auto Collect Candy Corn / Spill", Desc = "Sweeps and claims dropped Candy Corn and chests using Vector3 spill attributes", Default = Settings["Auto Collect Candy Corn"] or false },
 	function(v)
 		SaveSettings("Auto Collect Candy Corn", v)
 		if v then
 			task.spawn(function()
 				while Settings["Auto Collect Candy Corn"] and task.wait(0.3) do
 					pcall(function()
-						local candies = GetCandySpillPieces()
-						if #candies > 0 then
+						StackFarm = false
+						StackFarmOther = false
+						SweepCandySpill(1200)
+					end)
+				end
+			end)
+		end
+	end
+)
+
+-- SECTION 3: HALLOWEEN EVENT BOSSES
+HalloweenBossSection.CreateToggle(
+	{ Title = "Auto Farm All Event Bosses", Desc = "Automatically hunts any spawned Halloween event boss", Default = Settings["Auto Farm All Event Bosses"] or false },
+	function(v)
+		SaveSettings("Auto Farm All Event Bosses", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Farm All Event Bosses"] and task.wait(0.25) do
+					pcall(function()
+						local boss = GetHalloweenBoss()
+						if boss and isMobAliveSafe(boss) then
 							StackFarm = false
 							StackFarmOther = false
-							local target = candies[1]
-							toTarget(CFrame.new(target.pos))
-							if HalloweenRemotes.Event then
-								local pieceId = tonumber(target.obj.Name:match("Candy_(%d+)")) or tonumber(target.obj.Name:match("Chest_.*_(%d+)"))
-								if pieceId then
-									HalloweenRemotes.Event:FireServer("CandySpillClaim", pieceId)
-								end
-							end
-							task.wait(0.1)
+							farmTrickMob(boss)
 						end
 					end)
 				end
@@ -858,55 +1331,21 @@ HalloweenPumpkinSection.CreateToggle(
 	end
 )
 
------------------------------------------------------------------------------
--- SECTION 3: HALLOWEEN EVENT BOSSES
------------------------------------------------------------------------------
 HalloweenBossSection.CreateToggle(
 	{ Title = "Auto Farm Dapper Jack", Desc = "Hunts the Dapper Jack boss and auto-claims reward cards", Default = Settings["Auto Farm Dapper Jack"] or false },
 	function(v)
 		SaveSettings("Auto Farm Dapper Jack", v)
 		if v then
 			task.spawn(function()
-				while Settings["Auto Farm Dapper Jack"] and task.wait(0.2) do
+				while Settings["Auto Farm Dapper Jack"] and task.wait(0.25) do
 					pcall(function()
 						local boss = GetHalloweenBoss("Dapper Jack")
-						if boss and IsMobAlive(boss) then
+						if boss and isMobAliveSafe(boss) then
 							StackFarm = false
 							StackFarmOther = false
-							local hrp = boss:FindFirstChild("HumanoidRootPart")
-							if hrp then
-								toTarget(hrp.CFrame * CFrame.new(0, 25, 0))
-								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
-								ClickM1(boss)
-								if HalloweenRemotes.Event then
-									HalloweenRemotes.Event:FireServer("DapperJackCardClaim")
-								end
-							end
-						end
-					end)
-				end
-			end)
-		end
-	end
-)
-
-HalloweenBossSection.CreateToggle(
-	{ Title = "Auto Farm Jack o' Lantern & Mobs", Desc = "Attacks event mobs (Jack o' Lantern / Snowman) for candy and seeds", Default = Settings["Auto Farm Jack o' Lantern"] or false },
-	function(v)
-		SaveSettings("Auto Farm Jack o' Lantern", v)
-		if v then
-			task.spawn(function()
-				while Settings["Auto Farm Jack o' Lantern"] and task.wait(0.2) do
-					pcall(function()
-						local mob = GetHalloweenBoss("Jack o' Lantern") or GetHalloweenBoss("Snowman")
-						if mob and IsMobAlive(mob) then
-							StackFarm = false
-							StackFarmOther = false
-							local hrp = mob:FindFirstChild("HumanoidRootPart")
-							if hrp then
-								toTarget(hrp.CFrame * CFrame.new(0, 20, 0))
-								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
-								ClickM1(mob)
+							farmTrickMob(boss)
+							if HalloweenRemotes.Event then
+								HalloweenRemotes.Event:FireServer("DapperJackCardClaim")
 							end
 						end
 					end)
@@ -925,15 +1364,10 @@ HalloweenBossSection.CreateToggle(
 				while Settings["Auto Farm Werewolf"] and task.wait(0.3) do
 					pcall(function()
 						local boss = GetHalloweenBoss("Werewolf")
-						if boss and IsMobAlive(boss) then
+						if boss and isMobAliveSafe(boss) then
 							StackFarm = false
 							StackFarmOther = false
-							local hrp = boss:FindFirstChild("HumanoidRootPart")
-							if hrp then
-								toTarget(hrp.CFrame * CFrame.new(0, 22, 0))
-								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
-								ClickM1(boss)
-							end
+							farmTrickMob(boss)
 						end
 					end)
 				end
@@ -951,15 +1385,10 @@ HalloweenBossSection.CreateToggle(
 				while Settings["Auto Farm Hellfire Gas"] and task.wait(0.3) do
 					pcall(function()
 						local boss = GetHalloweenBoss("Hellfire Gas")
-						if boss and IsMobAlive(boss) then
+						if boss and isMobAliveSafe(boss) then
 							StackFarm = false
 							StackFarmOther = false
-							local hrp = boss:FindFirstChild("HumanoidRootPart")
-							if hrp then
-								toTarget(hrp.CFrame * CFrame.new(0, 25, 0))
-								if typeof(equiptool) == "function" then equiptool(Settings["Select Weapon"] or "Melee") end
-								ClickM1(boss)
-							end
+							farmTrickMob(boss)
 						end
 					end)
 				end
@@ -968,9 +1397,28 @@ HalloweenBossSection.CreateToggle(
 	end
 )
 
------------------------------------------------------------------------------
--- SECTION 4: RITUAL, PORTAL & GACHA
------------------------------------------------------------------------------
+HalloweenBossSection.CreateToggle(
+	{ Title = "Auto Farm Jack o' Lantern & Mobs", Desc = "Attacks event mobs (Jack o' Lantern / Snowman) for candy and seeds", Default = Settings["Auto Farm Jack o' Lantern"] or false },
+	function(v)
+		SaveSettings("Auto Farm Jack o' Lantern", v)
+		if v then
+			task.spawn(function()
+				while Settings["Auto Farm Jack o' Lantern"] and task.wait(0.25) do
+					pcall(function()
+						local mob = GetHalloweenBoss("Jack o' Lantern") or GetHalloweenBoss("Snowman")
+						if mob and isMobAliveSafe(mob) then
+							StackFarm = false
+							StackFarmOther = false
+							farmTrickMob(mob)
+						end
+					end)
+				end
+			end)
+		end
+	end
+)
+
+-- SECTION 4: RITUAL, PORTAL & SPOOKY GACHA
 HalloweenRitualSection.CreateButton(
 	{ Title = "Enter Halloween Realm / Portal" },
 	function()
@@ -1001,22 +1449,21 @@ HalloweenRitualSection.CreateToggle(
 )
 
 HalloweenRitualSection.CreateToggle(
-	{ Title = "Auto Roll Halloween Gacha", Desc = "Rolls the Halloween Event Gacha automatically using collected Candy", Default = Settings["Auto Roll Halloween Gacha"] or false },
+	{ Title = "Auto Roll Spooky Gacha", Desc = "Rolls the Halloween Spooky Gacha automatically using collected Candy Corn", Default = Settings["Auto Roll Halloween Gacha"] or false },
 	function(v)
 		SaveSettings("Auto Roll Halloween Gacha", v)
 		if v then
 			task.spawn(function()
 				while Settings["Auto Roll Halloween Gacha"] and task.wait(3) do
 					pcall(function()
-						if HalloweenRemotes.Function then
-							HalloweenRemotes.Function:InvokeServer("RollGacha")
-						end
+						StepSpookyGacha()
 					end)
 				end
 			end)
 		end
 	end
 )
+
 
 ESPTab = ESPTab or Main.CreatePage({ Page_Name = "ESP", Page_Title = "ESP Tab" })
 PvpTab = PvpTab or Main.CreatePage({ Page_Name = "PVP", Page_Title = "PVP Tab" })
@@ -4890,10 +5337,40 @@ getgenv().ClickM1Volcano = function(E, l)
 	AttackFunction(l and 80 or 30)
 end
 
--- Standalone Persistent Fast Attack Runner (Operates 100% independently of Auto Farm switches)
+-- Standalone Persistent Fast Attack Runner (Operates 100% independently of Auto Farm switches, ported from Fast-attack.lua)
 task.spawn(function()
+	local Net = L:WaitForChild("Modules"):WaitForChild("Net")
+	local RegisterAttackRemote = Net:FindFirstChild("RE/RegisterAttack")
+	local RegisterHitRemote = Net:FindFirstChild("RE/RegisterHit")
+	local clickDelay = 0.03
+
+	local function isAliveTarget(model)
+		if not model or not model.Parent then return false end
+		local h = model:FindFirstChildOfClass("Humanoid")
+		return h and h.Health > 0
+	end
+
+	local function processFolder(folder, range, myHRP, enemiesList)
+		local basePart = nil
+		if not folder then return nil end
+		for _, enemy in ipairs(folder:GetChildren()) do
+			if isAliveTarget(enemy) and enemy ~= t.Character then
+				local head = enemy:FindFirstChild("Head") or enemy:FindFirstChild("HumanoidRootPart")
+				if head then
+					local dist = (head.Position - myHRP.Position).Magnitude
+					if dist <= range then
+						table.insert(enemiesList, { enemy, head })
+						basePart = head
+						if #enemiesList >= 8 then break end
+					end
+				end
+			end
+		end
+		return basePart
+	end
+
 	while true do
-		task.wait(0.06)
+		task.wait(clickDelay)
 		if Settings and Settings["Fast Attack"] ~= false then
 			pcall(function()
 				local char = t.Character
@@ -4905,18 +5382,20 @@ task.spawn(function()
 				if stun and stun.Value ~= 0 then return end
 
 				local tool = char:FindFirstChildOfClass("Tool")
-				if tool then
-					local toolTip = tool.ToolTip
-					if toolTip == "Blox Fruit" or (Settings and Settings["Select Weapon"] == "Blox Fruit") then
-						local targets = AttackAOE(80, true)
-						if targets and #targets > 0 then
-							if not (getgenv().UseFruitM1 and getgenv().UseFruitM1(targets[1][1])) then
-								AttackFunction(80)
-							end
-						end
-					else
-						local targets = AttackAOE(70, false)
-						if targets and #targets > 0 then
+				if tool and tool.ToolTip ~= "Gun" then
+					local enemiesList = {}
+					local part1 = processFolder(workspace:FindFirstChild("Enemies"), 85, hrp, enemiesList)
+					if #enemiesList < 5 then
+						local part2 = processFolder(workspace:FindFirstChild("Characters"), 75, hrp, enemiesList)
+						part1 = part1 or part2
+					end
+
+					if part1 and #enemiesList > 0 then
+						if RegisterAttackRemote and RegisterHitRemote then
+							RegisterAttackRemote:FireServer(0)
+							local prim = table.remove(enemiesList, 1)
+							RegisterHitRemote:FireServer(prim[2], enemiesList)
+						else
 							AttackFunction(70)
 						end
 					end
@@ -7004,7 +7483,11 @@ function FarmMethod()
 				ClickM1(V)
 				vRoot = V:FindFirstChild("HumanoidRootPart")
 				if not vRoot or not IsMobAlive(V) then break end
-				if
+				local isPrisoner = (V.Name == "Prisoner" or V.Name == "Dangerous Prisoner" or V.Name:find("Prisoner"))
+				if isPrisoner then
+					-- Prison confrontation check: hover inside corridor at eye-level instead of roof ceiling
+					toTarget(vRoot.CFrame * CFrame.new(0, 3, -4))
+				elseif
 					game:GetService("Players").LocalPlayer.PlayerGui.TransformationHUD.ImageLabel.Visible
 					and (Settings["Auto Finish Train Quest"] or Settings["Auto Finish Train Draco Quest"])
 				then

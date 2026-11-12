@@ -2,7 +2,7 @@
 -- 🍌 BANANA KAITUN - ALL-IN-ONE STANDALONE SUITE (FIXED & ENHANCED)
 -- Autonomous Level 1 to Max (2550+) Botting Suite for Blox Fruits
 -- Powered by the battle-tested TweenManager & Farm Engine from Banana Hub
--- Integrated with GravityHub getgenv configuration & Ultra FPS Boost
+-- Integrated with BananaHub getgenv configuration & Ultra FPS Boost
 -- Zero external filesystem dependencies - 100% executor compatible
 -- ====================================================================
 
@@ -48,9 +48,9 @@ end)
 g.__BananaKaitun_Active = true
 
 -- ====================================================================
--- DEFAULT CONFIGURATION (GRAVITYHUB SCHEMA SPECIFICATION)
+-- DEFAULT CONFIGURATION (BANANAHUB SCHEMA SPECIFICATION)
 -- ====================================================================
-getgenv().GravityHub = getgenv().GravityHub or {
+getgenv().BananaHub = getgenv().BananaHub or getgenv().GravityHub or {
     ["Hide UI"] = false,
     ["Team"] = "Pirates", -- "Pirates" or "Marines" (Default: "Pirates")
     ["Reset Teleport"] = {
@@ -128,7 +128,9 @@ getgenv().GravityHub = getgenv().GravityHub or {
     }
 }
 
-local GH = getgenv().GravityHub
+getgenv().GravityHub = getgenv().BananaHub
+local BH = getgenv().BananaHub
+local GH = BH
 
 -- Session Cleanup Guard (Clean restart, eliminates duplicate loops/tweens)
 do
@@ -1008,18 +1010,25 @@ local function Attack()
         if stun and stun.Value ~= 0 then return end
 
         local hrp = char:FindFirstChild("HumanoidRootPart")
-        local enemies = Workspace:FindFirstChild("Enemies")
-        if not hrp or not enemies then return end
+        if not hrp then return end
 
         local hitTargets = {}
-        for _, mob in ipairs(enemies:GetChildren()) do
-            if IsMobAlive(mob) then
-                local mobHRP = mob:FindFirstChild("HumanoidRootPart")
-                if mobHRP and (mobHRP.Position - hrp.Position).Magnitude <= 75 then
-                    table.insert(hitTargets, { mob, mobHRP })
-                    if #hitTargets >= 5 then break end
+        local function scanFolder(folder, range, limit)
+            if not folder then return end
+            for _, mob in ipairs(folder:GetChildren()) do
+                if mob ~= char and IsMobAlive(mob) then
+                    local part = mob:FindFirstChild("Head") or mob:FindFirstChild("HumanoidRootPart")
+                    if part and (part.Position - hrp.Position).Magnitude <= range then
+                        table.insert(hitTargets, { mob, part })
+                        if #hitTargets >= limit then break end
+                    end
                 end
             end
+        end
+
+        scanFolder(Workspace:FindFirstChild("Enemies"), 85, 6)
+        if #hitTargets < 5 then
+            scanFolder(Workspace:FindFirstChild("Characters"), 75, 6)
         end
 
         if #hitTargets == 0 then return end
@@ -1037,62 +1046,150 @@ end
 
 task.spawn(function()
     while runtime.alive do
-        task.wait(0.05)
+        task.wait(0.03)
         Attack()
     end
 end)
 
 -- ====================================================================
--- 8. QUEST DATABASE (LEVEL 1 TO 2550+)
+-- RESTRICTED ITEM & PORTAL ENGINE (Ported from Quest_Hider.lua)
 -- ====================================================================
-local Data = {
-    Places = {
-        Sea1 = { 2753915549, 85211729168715 },
-        Sea2 = { 4442272183, 79091703265657 },
-        Sea3 = { 7449423635, 100117331123089 }
-    },
-    Quests = {
-        { Level = 1,   Mob = "Bandit",             Quest = "BanditQuest1",       Id = 1, PosQ = CFrame.new(1059.37, 16.51, 1549.26),  PosM = CFrame.new(1145.47, 16.51, 1608.82) },
-        { Level = 10,  Mob = "Monkey",             Quest = "JungleQuest",        Id = 1, PosQ = CFrame.new(-1598.08, 36.85, 153.38),  PosM = CFrame.new(-1448.14, 22.85, 229.86) },
-        { Level = 15,  Mob = "Gorilla",            Quest = "JungleQuest",        Id = 2, PosQ = CFrame.new(-1598.08, 36.85, 153.38),  PosM = CFrame.new(-1237.76, 6.28, -486.29) },
-        { Level = 30,  Mob = "Pirate",             Quest = "BuggyQuest1",        Id = 1, PosQ = CFrame.new(-1141.07, 4.75, 3831.55),  PosM = CFrame.new(-1201.07, 4.75, 3918.55) },
-        { Level = 40,  Mob = "Brute",              Quest = "BuggyQuest1",        Id = 2, PosQ = CFrame.new(-1141.07, 4.75, 3831.55),  PosM = CFrame.new(-1379.23, 14.75, 4134.42) },
-        { Level = 60,  Mob = "Desert Bandit",      Quest = "DesertQuest",        Id = 1, PosQ = CFrame.new(894.48, 6.44, 4392.43),    PosM = CFrame.new(996.48, 6.44, 4402.43) },
-        { Level = 75,  Mob = "Desert Officer",     Quest = "DesertQuest",        Id = 2, PosQ = CFrame.new(894.48, 6.44, 4392.43),    PosM = CFrame.new(1570.82, 10.44, 4373.91) },
-        { Level = 90,  Mob = "Snow Bandit",        Quest = "SnowQuest",          Id = 1, PosQ = CFrame.new(1385.50, 87.27, -1298.57), PosM = CFrame.new(1285.50, 105.27, -1348.57) },
-        { Level = 100, Mob = "Snowman",            Quest = "SnowQuest",          Id = 2, PosQ = CFrame.new(1385.50, 87.27, -1298.57), PosM = CFrame.new(1285.50, 150.27, -1500.57) },
-        { Level = 120, Mob = "Chief Petty Officer",Quest = "MarineQuest2",       Id = 1, PosQ = CFrame.new(-5039.59, 28.65, 4324.68), PosM = CFrame.new(-4850.59, 28.65, 4324.68) },
-        { Level = 150, Mob = "Sky Bandit",         Quest = "SkyQuest",           Id = 1, PosQ = CFrame.new(-4839.53, 717.67, -2619.44),PosM = CFrame.new(-4980.53, 717.67, -2619.44) },
-        { Level = 175, Mob = "Dark Master",        Quest = "SkyQuest",           Id = 2, PosQ = CFrame.new(-4839.53, 717.67, -2619.44),PosM = CFrame.new(-5250.53, 717.67, -2250.44) },
-        { Level = 190, Mob = "Prisoner",           Quest = "PrisonerQuest",      Id = 1, PosQ = CFrame.new(5308.93, 1.66, 475.12),    PosM = CFrame.new(5150.93, 1.66, 500.12) },
-        { Level = 210, Mob = "Dangerous Prisoner", Quest = "PrisonerQuest",      Id = 2, PosQ = CFrame.new(5308.93, 1.66, 475.12),    PosM = CFrame.new(5500.93, 1.66, 650.12) },
-        { Level = 250, Mob = "Toga Warrior",       Quest = "ColosseumQuest",     Id = 1, PosQ = CFrame.new(-1580.90, 7.35, -2986.40), PosM = CFrame.new(-1800.90, 7.35, -2986.40) },
-        { Level = 300, Mob = "Military Soldier",   Quest = "MagmaQuest",         Id = 1, PosQ = CFrame.new(-5313.37, 12.24, 8515.29), PosM = CFrame.new(-5400.37, 12.24, 8600.29) },
-        { Level = 375, Mob = "Fishman Warrior",    Quest = "FishmanQuest",       Id = 1, PosQ = CFrame.new(61122.65, 18.50, 1569.40), PosM = CFrame.new(61000.65, 18.50, 1500.40) },
-        { Level = 450, Mob = "God's Guard",        Quest = "SkyExp1Quest",       Id = 1, PosQ = CFrame.new(-4721.89, 845.28, -1954.28),PosM = CFrame.new(-4600.89, 845.28, -1850.28) },
-        { Level = 525, Mob = "Royal Squad",        Quest = "SkyExp2Quest",       Id = 1, PosQ = CFrame.new(-7906.82, 5636.01, -1411.99),PosM = CFrame.new(-7700.82, 5636.01, -1411.99) },
-        { Level = 625, Mob = "Galley Pirate",      Quest = "FountainQuest",      Id = 1, PosQ = CFrame.new(5259.82, 38.50, 4050.00),  PosM = CFrame.new(5559.82, 38.50, 4000.00) },
-
-        -- Sea 2
-        { Level = 700, Mob = "Raider",             Quest = "Area1Quest",         Id = 1, PosQ = CFrame.new(-429.54, 73.02, 1836.18),  PosM = CFrame.new(-650.54, 73.02, 1836.18) },
-        { Level = 775, Mob = "Swan Pirate",        Quest = "Area2Quest",         Id = 1, PosQ = CFrame.new(638.43, 73.02, 918.28),    PosM = CFrame.new(878.01, 121.36, 1212.18) },
-        { Level = 875, Mob = "Marine Lieutenant",  Quest = "MarineQuest3",       Id = 1, PosQ = CFrame.new(-2440.79, 73.02, -3216.06),PosM = CFrame.new(-2600.79, 73.02, -3216.06) },
-        { Level = 1000,Mob = "Snow Trooper",       Quest = "SnowMountainQuest",  Id = 1, PosQ = CFrame.new(609.86, 401.48, -5372.25), PosM = CFrame.new(500.86, 401.48, -5372.25) },
-        { Level = 1100,Mob = "Lab Subordinate",    Quest = "IceSideQuest",       Id = 1, PosQ = CFrame.new(-6064.07, 15.95, -4902.98),PosM = CFrame.new(-5800.07, 15.95, -4902.98) },
-        { Level = 1250,Mob = "Ship Deckhand",      Quest = "ShipQuest1",         Id = 1, PosQ = CFrame.new(1031.50, 125.07, 32911.00),PosM = CFrame.new(1150.50, 125.07, 32911.00) },
-        { Level = 1350,Mob = "Arctic Warrior",     Quest = "FrostQuest",         Id = 1, PosQ = CFrame.new(5667.66, 28.17, -6486.09), PosM = CFrame.new(5900.66, 28.17, -6486.09) },
-
-        -- Sea 3
-        { Level = 1500,Mob = "Pirate Millionaire", Quest = "PiratePortQuest",    Id = 1, PosQ = CFrame.new(-290.07, 43.85, 5580.08),  PosM = CFrame.new(-450.07, 43.85, 5580.08) },
-        { Level = 1575,Mob = "Dragon Crew Warrior",Quest = "DragonCrewQuest",    Id = 1, PosQ = CFrame.new(6747.01, 127.35, -948.51), PosM = CFrame.new(6500.01, 127.35, -948.51) },
-        { Level = 1700,Mob = "Fishman Raider",     Quest = "FloatingTurtleQuest",Id = 1, PosQ = CFrame.new(-1327.45, 53.15, -7579.22),PosM = CFrame.new(-1500.45, 53.15, -7579.22) },
-        { Level = 1825,Mob = "Forest Pirate",      Quest = "DeepForestIslandQuest",Id = 1,PosQ = CFrame.new(-13233.00, 332.00, -7625.00),PosM = CFrame.new(-13400.00, 332.00, -7625.00) },
-        { Level = 1975,Mob = "Reborn Skeleton",    Quest = "HauntedQuest1",      Id = 1, PosQ = CFrame.new(-9515.00, 142.00, 5535.00), PosM = CFrame.new(-8700.00, 142.00, 5535.00) },
-        { Level = 2075,Mob = "Living Zombie",      Quest = "HauntedQuest2",      Id = 1, PosQ = CFrame.new(-9515.00, 142.00, 5535.00), PosM = CFrame.new(-9515.00, 142.00, 6000.00) },
-        { Level = 2200,Mob = "Peanut Scout",       Quest = "PeanutQuest",        Id = 1, PosQ = CFrame.new(-2125.00, 48.00, -10190.00),PosM = CFrame.new(-1950.00, 48.00, -10190.00) },
-        { Level = 2300,Mob = "Ice Cream Chef",     Quest = "IceCreamQuest",      Id = 1, PosQ = CFrame.new(-850.00, 65.00, -10950.00), PosM = CFrame.new(-650.00, 65.00, -10950.00) },
-        { Level = 2450,Mob = "Isle Outlaw",        Quest = "TikiQuest1",         Id = 1, PosQ = CFrame.new(-16235.00, 12.00, 435.00),  PosM = CFrame.new(-16450.00, 12.00, 435.00) },
+local function HasRestrictedItem()
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local char = LocalPlayer.Character
+    local restricted = {
+        "God's Chalice", "Sweet Chalice", "Hallow Essence", "Red Key",
+        "Apple", "Banana", "Pineapple", "Flower 1", "Flower 2", "Flower 3"
     }
+    for _, name in ipairs(restricted) do
+        if (bp and bp:FindFirstChild(name)) or (char and char:FindFirstChild(name)) then
+            return true
+        end
+    end
+    return false
+end
+
+local function FindPortalRoute(origin, destination)
+    local direct = (destination - origin).Magnitude
+    if direct < 3000 then return nil end
+    local map = Workspace:FindFirstChild("Map")
+    local portal = map and map:FindFirstChild("TeleportSpawn", true)
+    local entrance = portal and portal:FindFirstChild("Entrance", true)
+    local exit = portal and portal:FindFirstChild("Exit", true)
+    if entrance and exit and entrance:IsA("BasePart") and exit:IsA("BasePart") then
+        for _, reverse in ipairs({ false, true }) do
+            local source = reverse and exit or entrance
+            local target = reverse and entrance or exit
+            local cost = (origin - source.Position).Magnitude + (destination - target.Position).Magnitude + 150
+            if cost + 1000 < direct then
+                return { Source = source.CFrame, Destination = target.CFrame }
+            end
+        end
+    end
+    return nil
+end
+
+-- ====================================================================
+-- 8. QUEST DATABASE (LEVEL 1 TO 2550+) - COMPLETE BANANA HUB MAPPING
+-- ====================================================================
+local Data = {}
+Data.Places = {
+    Sea1 = { 2753915549, 85211729168715 },
+    Sea2 = { 4442272183, 79091703265657 },
+    Sea3 = { 7449423635, 100117331123089 }
+}
+Data.Quests = {
+	{ Min = 1, Max = 9, Quest = "BanditQuest1", Id = 1, Mob = "Bandit", PosQ = CFrame.new(1045.9626464844, 27.002508163452, 1560.8203125), PosM = CFrame.new(1045.9626464844, 27.002508163452, 1560.8203125) },
+	{ Min = 10, Max = 14, Quest = "JungleQuest", Id = 1, Mob = "Monkey", PosQ = CFrame.new(-1598.08911, 35.5501175, 153.377838), PosM = CFrame.new(-1448.5180664062, 67.853012084961, 11.465796470642) },
+	{ Min = 15, Max = 29, Quest = "JungleQuest", Id = 2, Mob = "Gorilla", PosQ = CFrame.new(-1598.08911, 35.5501175, 153.377838), PosM = CFrame.new(-1129.8836669922, 40.46354675293, -525.42370605469) },
+	{ Min = 30, Max = 39, Quest = "BuggyQuest1", Id = 1, Mob = "Pirate", PosQ = CFrame.new(-1141.07483, 4.10001802, 3831.5498), PosM = CFrame.new(-1103.5134277344, 13.752052307129, 3896.0910644531) },
+	{ Min = 40, Max = 59, Quest = "BuggyQuest1", Id = 2, Mob = "Brute", PosQ = CFrame.new(-1141.07483, 4.10001802, 3831.5498), PosM = CFrame.new(-1140.0837402344, 14.809885025024, 4322.9213867188) },
+	{ Min = 60, Max = 74, Quest = "DesertQuest", Id = 1, Mob = "Desert Bandit", PosQ = CFrame.new(894.488647, 5.14000702, 4392.43359), PosM = CFrame.new(924.7998046875, 6.4486746788025, 4481.5859375) },
+	{ Min = 75, Max = 89, Quest = "DesertQuest", Id = 2, Mob = "Desert Officer", PosQ = CFrame.new(894.488647, 5.14000702, 4392.43359), PosM = CFrame.new(1608.2822265625, 8.6142244338989, 4371.0073242188) },
+	{ Min = 90, Max = 99, Quest = "SnowQuest", Id = 1, Mob = "Snow Bandit", PosQ = CFrame.new(1389.74451, 88.1519318, -1298.90796), PosM = CFrame.new(1354.3479003906, 87.272773742676, -1393.9465332031) },
+	{ Min = 100, Max = 119, Quest = "SnowQuest", Id = 2, Mob = "Snowman", PosQ = CFrame.new(1389.74451, 88.1519318, -1298.90796), PosM = CFrame.new(1201.6412353516, 144.57958984375, -1550.0670166016) },
+	{ Min = 120, Max = 149, Quest = "MarineQuest2", Id = 1, Mob = "Chief Petty Officer", PosQ = CFrame.new(-5039.58643, 27.3500385, 4324.68018), PosM = CFrame.new(-4881.2309570312, 22.652044296265, 4273.7524414062) },
+	{ Min = 150, Max = 174, Quest = "SkyQuest", Id = 1, Mob = "Sky Bandit", PosQ = CFrame.new(-5406.29, 410.11, -694.04), PosM = CFrame.new(-5091.62, 280.72, -1019.22) },
+	{ Min = 175, Max = 189, Quest = "SkyQuest", Id = 2, Mob = "Dark Master", PosQ = CFrame.new(-5406.29, 410.11, -694.04), PosM = CFrame.new(-5269.01, 504.98, -461.12) },
+	{ Min = 190, Max = 209, Quest = "PrisonerQuest", Id = 1, Mob = "Prisoner", PosQ = CFrame.new(5308.93115, 1.65517521, 475.120514), PosM = CFrame.new(5098.9736328125, -0.3204058110714, 474.23733520508) },
+	{ Min = 210, Max = 249, Quest = "PrisonerQuest", Id = 2, Mob = "Dangerous Prisoner", PosQ = CFrame.new(5308.93115, 1.65517521, 475.120514), PosM = CFrame.new(5654.5634765625, 15.633401870728, 866.29919433594) },
+	{ Min = 250, Max = 274, Quest = "ColosseumQuest", Id = 1, Mob = "Toga Warrior", PosQ = CFrame.new(-1580.04663, 6.35000277, -2986.47534), PosM = CFrame.new(-1820.21484375, 51.683856964111, -2740.6650390625) },
+	{ Min = 275, Max = 299, Quest = "ColosseumQuest", Id = 2, Mob = "Gladiator", PosQ = CFrame.new(-1580.04663, 6.35000277, -2986.47534), PosM = CFrame.new(-1292.8381347656, 56.380882263184, -3339.0314941406) },
+	{ Min = 300, Max = 324, Quest = "MagmaQuest", Id = 1, Mob = "Military Soldier", PosQ = CFrame.new(-5313.37012, 10.9500084, 8515.29395), PosM = CFrame.new(-5411.1645507812, 11.081554412842, 8454.29296875) },
+	{ Min = 325, Max = 374, Quest = "MagmaQuest", Id = 2, Mob = "Military Spy", PosQ = CFrame.new(-5313.37012, 10.9500084, 8515.29395), PosM = CFrame.new(-5802.8681640625, 86.262413024902, 8828.859375) },
+	{ Min = 375, Max = 399, Quest = "FishmanQuest", Id = 1, Mob = "Fishman Warrior", PosQ = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734), PosM = CFrame.new(60878.30078125, 18.482830047607, 1543.7574462891) },
+	{ Min = 400, Max = 449, Quest = "FishmanQuest", Id = 2, Mob = "Fishman Commando", PosQ = CFrame.new(61122.65234375, 18.497442245483, 1569.3997802734), PosM = CFrame.new(61922.6328125, 18.482830047607, 1493.9343261719) },
+	{ Min = 450, Max = 474, Quest = "SkyExp1Quest", Id = 1, Mob = "God's Guard", PosQ = CFrame.new(-4721.88867, 843.874695, -1949.96643), PosM = CFrame.new(-4234.55, 1089.33, -267.37) },
+	{ Min = 475, Max = 524, Quest = "SkyExp1Quest", Id = 2, Mob = "Shanda", PosQ = CFrame.new(-5949.0673828125, 5467.93994140625, 2086.51513671875), PosM = CFrame.new(-5950.41, 5470.0, 1800.0) },
+	{ Min = 525, Max = 549, Quest = "SkyExp2Quest", Id = 1, Mob = "Royal Squad", PosQ = CFrame.new(-7033.1005859375, 5590.57421875, 1353.10693359375), PosM = CFrame.new(-6800.0, 5552.0, 1220.0) },
+	{ Min = 550, Max = 624, Quest = "SkyExp2Quest", Id = 2, Mob = "Royal Soldier", PosQ = CFrame.new(-7033.1005859375, 5590.57421875, 1353.10693359375), PosM = CFrame.new(-7050.0, 5542.0, 930.0) },
+	{ Min = 625, Max = 649, Quest = "FountainQuest", Id = 1, Mob = "Galley Pirate", PosQ = CFrame.new(5259.81982, 37.3500175, 4050.0293), PosM = CFrame.new(5551.0219726562, 78.901351928711, 3930.4128417969) },
+	{ Min = 650, Max = 699, Quest = "FountainQuest", Id = 2, Mob = "Galley Captain", PosQ = CFrame.new(5259.81982, 37.3500175, 4050.0293), PosM = CFrame.new(5441.9516601562, 42.502059936523, 4950.09375) },
+	{ Min = 700, Max = 724, Quest = "Area1Quest", Id = 1, Mob = "Raider", PosQ = CFrame.new(-429.543518, 71.7699966, 1836.18188), PosM = CFrame.new(-728.32672119141, 52.779319763184, 2345.7705078125) },
+	{ Min = 725, Max = 774, Quest = "Area1Quest", Id = 2, Mob = "Mercenary", PosQ = CFrame.new(-429.543518, 71.7699966, 1836.18188), PosM = CFrame.new(-1004.3244018555, 80.158866882324, 1424.6193847656) },
+	{ Min = 775, Max = 799, Quest = "Area2Quest", Id = 1, Mob = "Swan Pirate", PosQ = CFrame.new(638.43811, 71.769989, 918.282898), PosM = CFrame.new(1068.6643066406, 137.61428833008, 1322.1060791016) },
+	{ Min = 800, Max = 874, Quest = "Area2Quest", Id = 2, Mob = "Factory Staff", PosQ = CFrame.new(632.698608, 73.1055908, 918.666321), PosM = CFrame.new(73.078674316406, 81.863441467285, -27.470672607422) },
+	{ Min = 875, Max = 899, Quest = "MarineQuest3", Id = 1, Mob = "Marine Lieutenant", PosQ = CFrame.new(-2440.79639, 71.7140732, -3216.06812), PosM = CFrame.new(-2821.3723144531, 75.897277832031, -3070.0891113281) },
+	{ Min = 900, Max = 949, Quest = "MarineQuest3", Id = 2, Mob = "Marine Captain", PosQ = CFrame.new(-2440.79639, 71.7140732, -3216.06812), PosM = CFrame.new(-1861.2310791016, 80.176582336426, -3254.6975097656) },
+	{ Min = 950, Max = 974, Quest = "ZombieQuest", Id = 1, Mob = "Zombie", PosQ = CFrame.new(-5497.06152, 47.5923004, -795.237061), PosM = CFrame.new(-5657.7768554688, 78.969734191895, -928.68701171875) },
+	{ Min = 975, Max = 999, Quest = "ZombieQuest", Id = 2, Mob = "Vampire", PosQ = CFrame.new(-5497.06152, 47.5923004, -795.237061), PosM = CFrame.new(-6037.66796875, 32.184638977051, -1340.6597900391) },
+	{ Min = 1000, Max = 1049, Quest = "SnowMountainQuest", Id = 1, Mob = "Snow Trooper", PosQ = CFrame.new(609.858826, 400.119904, -5372.25928), PosM = CFrame.new(549.14733886719, 427.38705444336, -5563.6987304688) },
+	{ Min = 1050, Max = 1099, Quest = "SnowMountainQuest", Id = 2, Mob = "Winter Warrior", PosQ = CFrame.new(609.858826, 400.119904, -5372.25928), PosM = CFrame.new(1142.7451171875, 475.63980102539, -5199.4165039062) },
+	{ Min = 1100, Max = 1124, Quest = "IceSideQuest", Id = 1, Mob = "Lab Subordinate", PosQ = CFrame.new(-6064.06885, 15.2422857, -4902.97852), PosM = CFrame.new(-5707.4716796875, 15.951709747314, -4513.3920898438) },
+	{ Min = 1125, Max = 1174, Quest = "IceSideQuest", Id = 2, Mob = "Horned Warrior", PosQ = CFrame.new(-6064.06885, 15.2422857, -4902.97852), PosM = CFrame.new(-6341.3666992188, 15.951770782471, -5723.162109375) },
+	{ Min = 1175, Max = 1199, Quest = "FireSideQuest", Id = 1, Mob = "Magma Ninja", PosQ = CFrame.new(-5428.03174, 15.0622921, -5299.43457), PosM = CFrame.new(-5449.6728515625, 76.658744812012, -5808.2006835938) },
+	{ Min = 1200, Max = 1249, Quest = "FireSideQuest", Id = 2, Mob = "Lava Pirate", PosQ = CFrame.new(-5428.03174, 15.0622921, -5299.43457), PosM = CFrame.new(-5213.3315429688, 49.737880706787, -4701.451171875) },
+	{ Min = 1250, Max = 1274, Quest = "ShipQuest1", Id = 1, Mob = "Ship Deckhand", PosQ = CFrame.new(1037.80127, 125.092171, 32911.6016), PosM = CFrame.new(1212.0111083984, 150.79205322266, 33059.24609375) },
+	{ Min = 1275, Max = 1299, Quest = "ShipQuest1", Id = 2, Mob = "Ship Engineer", PosQ = CFrame.new(1037.80127, 125.092171, 32911.6016), PosM = CFrame.new(919.47863769531, 43.544013977051, 32779.96875) },
+	{ Min = 1300, Max = 1324, Quest = "ShipQuest2", Id = 1, Mob = "Ship Steward", PosQ = CFrame.new(968.80957, 125.092171, 33244.125), PosM = CFrame.new(919.43853759766, 129.55599975586, 33436.03515625) },
+	{ Min = 1325, Max = 1349, Quest = "ShipQuest2", Id = 2, Mob = "Ship Officer", PosQ = CFrame.new(968.80957, 125.092171, 33244.125), PosM = CFrame.new(1036.0179443359, 181.4390411377, 33315.7265625) },
+	{ Min = 1350, Max = 1374, Quest = "FrostQuest", Id = 1, Mob = "Arctic Warrior", PosQ = CFrame.new(5667.6582, 26.7997818, -6486.08984), PosM = CFrame.new(5966.24609375, 62.970020294189, -6179.3828125) },
+	{ Min = 1375, Max = 1424, Quest = "FrostQuest", Id = 2, Mob = "Snow Lurker", PosQ = CFrame.new(5667.6582, 26.7997818, -6486.08984), PosM = CFrame.new(5407.0737304688, 69.194374084473, -6880.8803710938) },
+	{ Min = 1425, Max = 1449, Quest = "ForgottenQuest", Id = 1, Mob = "Sea Soldier", PosQ = CFrame.new(-3054.44458, 235.544281, -10142.8193), PosM = CFrame.new(-3028.2236328125, 64.674514770508, -9775.4267578125) },
+	{ Min = 1450, Max = 1499, Quest = "ForgottenQuest", Id = 2, Mob = "Water Fighter", PosQ = CFrame.new(-3054.44458, 235.544281, -10142.8193), PosM = CFrame.new(-3352.9013671875, 285.01556396484, -10534.841796875) },
+	{ Min = 1500, Max = 1524, Quest = "PiratePortQuest", Id = 1, Mob = "Pirate Millionaire", PosQ = CFrame.new(-290.07, 42.9, 5581.59), PosM = CFrame.new(-246, 47.31, 5584.1) },
+	{ Min = 1525, Max = 1574, Quest = "PiratePortQuest", Id = 2, Mob = "Pistol Billionaire", PosQ = CFrame.new(-290.07, 42.9, 5581.59), PosM = CFrame.new(-187.33, 86.24, 6013.51) },
+	{ Min = 1575, Max = 1599, Quest = "DragonCrewQuest", Id = 1, Mob = "Dragon Crew Warrior", PosQ = CFrame.new(6737.06055, 127.417763, -712.300659), PosM = CFrame.new(6709.76367, 52.3442993, -1139.02966) },
+	{ Min = 1600, Max = 1624, Quest = "DragonCrewQuest", Id = 2, Mob = "Dragon Crew Archer", PosQ = CFrame.new(6737.06055, 127.417763, -712.300659), PosM = CFrame.new(6668.76172, 481.376923, 329.12207) },
+	{ Min = 1625, Max = 1649, Quest = "VenomCrewQuest", Id = 1, Mob = "Hydra Enforcer", PosQ = CFrame.new(5206.4018554688, 1004.1049804688, 748.35046386719), PosM = CFrame.new(4547.11523, 1003.10217, 334.194824) },
+	{ Min = 1650, Max = 1699, Quest = "VenomCrewQuest", Id = 2, Mob = "Venomous Assailant", PosQ = CFrame.new(5206.4018554688, 1004.1049804688, 748.35046386719), PosM = CFrame.new(4674.92676, 1134.82654, 996.308838) },
+	{ Min = 1700, Max = 1724, Quest = "MarineTreeIsland", Id = 1, Mob = "Marine Commodore", PosQ = CFrame.new(2180.54126, 27.8156815, -6741.5498), PosM = CFrame.new(2286.0078125, 73.133918762207, -7159.8090820312) },
+	{ Min = 1725, Max = 1774, Quest = "MarineTreeIsland", Id = 2, Mob = "Marine Rear Admiral", PosQ = CFrame.new(2179.98828125, 28.731239318848, -6740.0551757813), PosM = CFrame.new(3656.7736816406, 160.52406311035, -7001.5986328125) },
+	{ Min = 1775, Max = 1799, Quest = "DeepForestIsland3", Id = 1, Mob = "Fishman Raider", PosQ = CFrame.new(-10581.6563, 330.872955, -8761.18652), PosM = CFrame.new(-10407.526367188, 331.76263427734, -8368.5166015625) },
+	{ Min = 1800, Max = 1824, Quest = "DeepForestIsland3", Id = 2, Mob = "Fishman Captain", PosQ = CFrame.new(-10581.6563, 330.872955, -8761.18652), PosM = CFrame.new(-10994.701171875, 352.38140869141, -9002.1103515625) },
+	{ Min = 1825, Max = 1849, Quest = "DeepForestIsland", Id = 1, Mob = "Forest Pirate", PosQ = CFrame.new(-13234.04, 331.488495, -7625.40137), PosM = CFrame.new(-13274.478515625, 332.37814331055, -7769.5805664062) },
+	{ Min = 1850, Max = 1899, Quest = "DeepForestIsland", Id = 2, Mob = "Mythological Pirate", PosQ = CFrame.new(-13234.04, 331.488495, -7625.40137), PosM = CFrame.new(-13680.607421875, 501.08154296875, -6991.189453125) },
+	{ Min = 1900, Max = 1924, Quest = "DeepForestIsland2", Id = 1, Mob = "Jungle Pirate", PosQ = CFrame.new(-12680.3818, 389.971039, -9902.01953), PosM = CFrame.new(-12256.16015625, 331.73828125, -10485.836914062) },
+	{ Min = 1925, Max = 1974, Quest = "DeepForestIsland2", Id = 2, Mob = "Musketeer Pirate", PosQ = CFrame.new(-12680.3818, 389.971039, -9902.01953), PosM = CFrame.new(-13457.904296875, 391.54565429688, -9859.177734375) },
+	{ Min = 1975, Max = 1999, Quest = "HauntedQuest1", Id = 1, Mob = "Reborn Skeleton", PosQ = CFrame.new(-9479.2168, 141.215088, 5566.09277), PosM = CFrame.new(-8763.7236328125, 165.72299194336, 6159.8618164062) },
+	{ Min = 2000, Max = 2024, Quest = "HauntedQuest1", Id = 2, Mob = "Living Zombie", PosQ = CFrame.new(-9479.2168, 141.215088, 5566.09277), PosM = CFrame.new(-10144.131835938, 138.6266784668, 5838.0888671875) },
+	{ Min = 2025, Max = 2049, Quest = "HauntedQuest2", Id = 1, Mob = "Demonic Soul", PosQ = CFrame.new(-9516.99316, 172.017181, 6078.46533), PosM = CFrame.new(-9505.8720703125, 172.10482788086, 6158.9931640625) },
+	{ Min = 2050, Max = 2074, Quest = "HauntedQuest2", Id = 2, Mob = "Posessed Mummy", PosQ = CFrame.new(-9516.99316, 172.017181, 6078.46533), PosM = CFrame.new(-9582.0224609375, 6.2515273094177, 6205.478515625) },
+	{ Min = 2075, Max = 2099, Quest = "NutsIslandQuest", Id = 1, Mob = "Peanut Scout", PosQ = CFrame.new(-2104.3908691406, 38.104167938232, -10194.21875), PosM = CFrame.new(-2143.2419433594, 47.721984863281, -10029.995117188) },
+	{ Min = 2100, Max = 2124, Quest = "NutsIslandQuest", Id = 2, Mob = "Peanut President", PosQ = CFrame.new(-2104.3908691406, 38.104167938232, -10194.21875), PosM = CFrame.new(-1859.3540039062, 38.103168487549, -10422.4296875) },
+	{ Min = 2125, Max = 2149, Quest = "IceCreamIslandQuest", Id = 1, Mob = "Ice Cream Chef", PosQ = CFrame.new(-820.64825439453, 65.819526672363, -10965.795898438), PosM = CFrame.new(-872.24658203125, 65.81957244873, -10919.95703125) },
+	{ Min = 2150, Max = 2199, Quest = "IceCreamIslandQuest", Id = 2, Mob = "Ice Cream Commander", PosQ = CFrame.new(-820.64825439453, 65.819526672363, -10965.795898438), PosM = CFrame.new(-558.06103515625, 112.04895782471, -11290.774414062) },
+	{ Min = 2200, Max = 2224, Quest = "CakeQuest1", Id = 1, Mob = "Cookie Crafter", PosQ = CFrame.new(-2021.32007, 37.7982254, -12028.7295), PosM = CFrame.new(-2374.13671875, 37.798263549805, -12125.30859375) },
+	{ Min = 2225, Max = 2249, Quest = "CakeQuest1", Id = 2, Mob = "Cake Guard", PosQ = CFrame.new(-2021.32007, 37.7982254, -12028.7295), PosM = CFrame.new(-1598.3070068359, 43.773197174072, -12244.581054688) },
+	{ Min = 2250, Max = 2274, Quest = "CakeQuest2", Id = 1, Mob = "Baking Staff", PosQ = CFrame.new(-1927.91602, 37.7981339, -12842.5391), PosM = CFrame.new(-1887.8099365234, 77.618507385254, -12998.350585938) },
+	{ Min = 2275, Max = 2299, Quest = "CakeQuest2", Id = 2, Mob = "Head Baker", PosQ = CFrame.new(-1927.91602, 37.7981339, -12842.5391), PosM = CFrame.new(-2216.1882324219, 82.884521484375, -12869.293945312) },
+	{ Min = 2300, Max = 2324, Quest = "ChocQuest1", Id = 1, Mob = "Cocoa Warrior", PosQ = CFrame.new(233.22836303711, 29.876001358032, -12201.233398438), PosM = CFrame.new(-21.553283691406, 80.574996948242, -12352.387695312) },
+	{ Min = 2325, Max = 2349, Quest = "ChocQuest1", Id = 2, Mob = "Chocolate Bar Battler", PosQ = CFrame.new(233.22836303711, 29.876001358032, -12201.233398438), PosM = CFrame.new(582.59057617188, 77.188095092773, -12463.162109375) },
+	{ Min = 2350, Max = 2374, Quest = "ChocQuest2", Id = 1, Mob = "Sweet Thief", PosQ = CFrame.new(150.50663757324, 30.693693161011, -12774.502929688), PosM = CFrame.new(165.1884765625, 76.058853149414, -12600.836914062) },
+	{ Min = 2375, Max = 2399, Quest = "ChocQuest2", Id = 2, Mob = "Candy Rebel", PosQ = CFrame.new(150.50663757324, 30.693693161011, -12774.502929688), PosM = CFrame.new(134.86563110352, 77.247680664062, -12876.547851562) },
+	{ Min = 2400, Max = 2449, Quest = "CandyQuest1", Id = 1, Mob = "Candy Pirate", PosQ = CFrame.new(-1150.0400390625, 20.378934860229, -14446.334960938), PosM = CFrame.new(-1310.5003662109, 26.016523361206, -14562.404296875) },
+	{ Min = 2450, Max = 2474, Quest = "TikiQuest1", Id = 1, Mob = "Isle Outlaw", PosQ = CFrame.new(-16548.8164, 55.6059914, -172.8125), PosM = CFrame.new(-16479.900390625, 226.6117401123, -300.31143188477) },
+	{ Min = 2475, Max = 2499, Quest = "TikiQuest1", Id = 2, Mob = "Island Boy", PosQ = CFrame.new(-16548.8164, 55.6059914, -172.8125), PosM = CFrame.new(-16849.396484375, 192.86505126953, -150.78532409668) },
+	{ Min = 2500, Max = 2524, Quest = "TikiQuest2", Id = 1, Mob = "Sun-kissed Warrior", PosQ = CFrame.new(-16538, 55, 1049), PosM = CFrame.new(-16347, 64, 984) },
+	{ Min = 2525, Max = 2550, Quest = "TikiQuest2", Id = 2, Mob = "Isle Champion", PosQ = CFrame.new(-16541.0215, 57.3082275, 1051.46118), PosM = CFrame.new(-16602.1015625, 130.38734436035, 1087.2456054688) },
+	{ Min = 2551, Max = 2574, Quest = "TikiQuest3", Id = 1, Mob = "Serpent Hunter", PosQ = CFrame.new(-16668.03, 105.32, 1568.6), PosM = CFrame.new(-16645.64, 163.09, 1352.87) },
+	{ Min = 2575, Max = 2599, Quest = "TikiQuest3", Id = 2, Mob = "Skull Slayer", PosQ = CFrame.new(-16668.03, 105.32, 1568.6), PosM = CFrame.new(-16709.49, 419.68, 1751.09) },
+	{ Min = 2600, Max = 2624, Quest = "SubmergedQuest1", Id = 1, Mob = "Reef Bandit", PosQ = CFrame.new(10778.875, -2087.72437, 9265.18359), PosM = CFrame.new(11019.1318, -2146.06812, 9342.3916) },
+	{ Min = 2625, Max = 2649, Quest = "SubmergedQuest1", Id = 2, Mob = "Coral Pirate", PosQ = CFrame.new(10778.875, -2087.72437, 9265.18359), PosM = CFrame.new(10808.6006, -2030.36145, 9364.2334) },
+	{ Min = 2650, Max = 2674, Quest = "SubmergedQuest2", Id = 1, Mob = "Sea Chanter", PosQ = CFrame.new(10880.6855, -2086.20044, 10032.624), PosM = CFrame.new(10671.2715, -2057.59155, 10047.2588) },
+	{ Min = 2675, Max = 2699, Quest = "SubmergedQuest2", Id = 2, Mob = "Ocean Prophet", PosQ = CFrame.new(10880.6855, -2086.20044, 10032.624), PosM = CFrame.new(11008.5195, -2007.72839, 10223.0791) },
+	{ Min = 2700, Max = 2724, Quest = "SubmergedQuest3", Id = 1, Mob = "High Disciple", PosQ = CFrame.new(9640.08789, -1992.44507, 9613.65234), PosM = CFrame.new(9750.41602, -1966.93884, 9753.36035) },
+	{ Min = 2725, Max = 9999, Quest = "SubmergedQuest3", Id = 2, Mob = "Grand Devotee", PosQ = CFrame.new(9640.08789, -1992.44507, 9613.65234), PosM = CFrame.new(9611.70508, -1993.47119, 9882.68848) },
 }
 
 function Data.GetSea()
@@ -1104,9 +1201,21 @@ function Data.GetSea()
 end
 
 function Data.GetQuest(lvl)
+    lvl = tonumber(lvl) or 1
+    local currentSea = Data.GetSea()
+    if currentSea == 1 and lvl >= 700 then
+        lvl = 650
+    elseif currentSea == 2 and lvl >= 1500 then
+        lvl = 1450
+    end
+    for _, q in ipairs(Data.Quests) do
+        if lvl >= q.Min and lvl <= q.Max then
+            return q
+        end
+    end
     local best = Data.Quests[1]
     for _, q in ipairs(Data.Quests) do
-        if lvl >= q.Level then best = q else break end
+        if lvl >= q.Min then best = q else break end
     end
     return best
 end
@@ -1141,18 +1250,33 @@ end
 
 local function HasActiveQuest()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-    local tqf = pgui and pgui:FindFirstChild("TrackedQuestFrame")
-    if tqf and tqf.Enabled and tqf:FindFirstChild("Frame") then return true end
+    if pgui then
+        local main = pgui:FindFirstChild("Main")
+        if main then
+            local qFrame = main:FindFirstChild("Quest")
+            if qFrame and qFrame.Visible then
+                return true
+            end
+        end
+        local tqf = pgui:FindFirstChild("TrackedQuestFrame")
+        if tqf and tqf.Enabled and tqf:FindFirstChild("Frame") then
+            return true
+        end
+    end
     local guide = ReplicatedStorage:FindFirstChild("GuideModule")
     if guide then
-        local g = require(guide)
-        if g and g.Data and g.Data.QuestData then return true end
+        pcall(function()
+            local g = require(guide)
+            if g and g.Data and g.Data.QuestData then
+                return true
+            end
+        end)
     end
     return false
 end
 
 -- ====================================================================
--- 9. GRAVITYHUB BACKGROUND SERVICES (FRUIT SNIPER, AUTO CHAT, HAKI)
+-- 9. BANANAHUB BACKGROUND SERVICES (FRUIT SNIPER, AUTO CHAT, HAKI)
 -- ====================================================================
 
 -- Auto Stat Allocator
@@ -1261,7 +1385,7 @@ local Race = {
     AncientClockCF  = CFrame.new(28576.47, 14935.95, 75.47),
 }
 
--- Synchronize with GravityHub "Get Items"
+-- Synchronize with BananaHub "Get Items"
 if GH["Get Items"] then
     if GH["Get Items"]["Upgrade Race V2-V3"] ~= nil then
         Race.AutoRaceV2 = GH["Get Items"]["Upgrade Race V2-V3"]
@@ -2790,14 +2914,29 @@ task.spawn(function()
 
             if not HasActiveQuest() then
                 HUDStatus = string.format("Accepting Quest: %s", quest.Quest)
-                toTarget(quest.PosQ, 5)
+                local targetQ = quest.PosQ
+                pcall(function()
+                    local npcs = Workspace:FindFirstChild("NPCs")
+                    if npcs then
+                        for _, npc in ipairs(npcs:GetChildren()) do
+                            if npc:IsA("Model") and (npc.Name:find("Quest") or npc.Name:find(quest.Quest)) then
+                                local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
+                                if root and (root.Position - quest.PosQ.Position).Magnitude <= 120 then
+                                    targetQ = root.CFrame
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end)
+                toTarget(targetQ, 8)
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and (hrp.Position - quest.PosQ.Position).Magnitude <= 10 and CommF then
+                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 35 and CommF then
                     CommF:InvokeServer("StartQuest", quest.Quest, quest.Id)
                     task.wait(0.3)
                 end
             else
-                HUDStatus = string.format("Farming %s (Lv %d)", quest.Mob, quest.Level)
+                HUDStatus = string.format("Farming %s (Lv %d)", quest.Mob, quest.Min or 1)
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
                 if enemies then
@@ -2812,7 +2951,9 @@ task.spawn(function()
                 if targetMob then
                     local mobHRP = targetMob:FindFirstChild("HumanoidRootPart")
                     if mobHRP then
-                        toTarget(GetFarmCFrame(mobHRP), 5)
+                        local isPrisoner = (targetMob.Name == "Prisoner" or targetMob.Name == "Dangerous Prisoner" or targetMob.Name:find("Prisoner"))
+                        local farmCF = isPrisoner and (mobHRP.CFrame * CFrame.new(0, 3, -4)) or GetFarmCFrame(mobHRP)
+                        toTarget(farmCF, 5)
                         BringMob(targetMob)
                         EquipWeapon()
                     end
@@ -2824,4 +2965,4 @@ task.spawn(function()
     end
 end)
 
-print("[🍌 Banana Kaitun Standalone] Initialized with GravityHub schema & Ultra FPS Boost!")
+print("[🍌 Banana Kaitun Standalone] Initialized with BananaHub schema & Ultra FPS Boost!")
