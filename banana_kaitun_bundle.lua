@@ -9,30 +9,19 @@
 repeat wait() until game:IsLoaded() and game:GetService("Players").LocalPlayer
 
 -- ====================================================================
--- BANANA KAITUN - SINGLETON EXECUTION GUARD (PREVENTS 2x / 3x MULTI-EXECUTE)
--- Automatically cancels out duplicate executions if script is already running
+-- BANANA KAITUN - SINGLETON EXECUTION GUARD & CLEAN RELOAD
+-- Automatically cancels out previous instance and keeps the current executed
 -- ====================================================================
 local g = getgenv()
-if g.__BananaKaitun_Active and g.__BananaKaitun_RT and g.__BananaKaitun_RT.alive and not g.ForceReload and not g.__BananaKaitun_ForceReload then
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "🍌 Banana Hub Kaitun",
-            Text = "Script is already running! Duplicate execution cancelled.",
-            Duration = 4
-        })
-    end)
-    warn("[🍌 Banana Hub Kaitun] Script is ALREADY ACTIVE & RUNNING! Duplicate execution cancelled.")
-    return
-end
 
--- If previous instance requested reload, cleanly shut it down first
+-- If a previous instance is running, cleanly shut it down so the new execution runs fresh
 if type(g.__BananaKaitun_Shutdown) == "function" then
     pcall(g.__BananaKaitun_Shutdown)
 end
 
--- Destroy existing duplicate UIs in CoreGui or PlayerGui
+-- Destroy existing duplicate UIs in CoreGui, PlayerGui or gethui()
 pcall(function()
-    local core = game:GetService("CoreGui")
+    local core = (typeof(gethui) == "function" and gethui()) or game:GetService("CoreGui")
     local lp = game:GetService("Players").LocalPlayer
     local pg = lp and lp:FindFirstChild("PlayerGui")
     for _, parent in ipairs({ core, pg }) do
@@ -282,23 +271,14 @@ local function AutoSelectTeam()
     end)
 end
 
--- Wait for team and character spawn
-if not LocalPlayer.Team then
-    AutoSelectTeam()
+-- Run Team Selector in background non-blocking so UI & services initialize instantly
+task.spawn(function()
     local waitStart = tick()
-    repeat
-        task.wait(0.5)
-        if not LocalPlayer.Team then
-            AutoSelectTeam()
-        end
-    until LocalPlayer.Team or (tick() - waitStart > 10)
-end
-
--- Ensure character and rootpart are spawned before continuing
-if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-    LocalPlayer.CharacterAdded:Wait()
-    LocalPlayer.Character:WaitForChild("HumanoidRootPart", 10)
-end
+    while runtime.alive and not LocalPlayer.Team and (tick() - waitStart < 12) do
+        AutoSelectTeam()
+        task.wait(0.35)
+    end
+end)
 
 
 -- ====================================================================
@@ -440,14 +420,23 @@ local RegisterAttackRemote = nil
 local RegisterHitRemote = nil
 
 pcall(function()
-    CommF = ReplicatedStorage:WaitForChild("Remotes", 5) and ReplicatedStorage.Remotes:WaitForChild("CommF_", 5)
+    CommF = (ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_"))
+        or ReplicatedStorage:WaitForChild("Remotes", 5) and ReplicatedStorage.Remotes:WaitForChild("CommF_", 5)
         or ReplicatedStorage:FindFirstChild("CommF_")
-    local modules = ReplicatedStorage:WaitForChild("Modules", 5)
+
+    local modules = ReplicatedStorage:FindFirstChild("Modules") or ReplicatedStorage:WaitForChild("Modules", 5)
     if modules then
-        local net = modules:FindFirstChild("Net") and require(modules.Net)
+        local net = modules:FindFirstChild("Net")
         if net then
-            RegisterAttackRemote = modules.Net:FindFirstChild("RE/RegisterAttack")
-            RegisterHitRemote = net:RemoteEvent("RegisterHit", true)
+            RegisterAttackRemote = net:FindFirstChild("RE/RegisterAttack")
+            RegisterHitRemote = net:FindFirstChild("RE/RegisterHit")
+            if (not RegisterAttackRemote or not RegisterHitRemote) and typeof(require) == "function" then
+                pcall(function()
+                    local netMod = require(net)
+                    RegisterAttackRemote = RegisterAttackRemote or (netMod and netMod:RemoteEvent("RegisterAttack", true))
+                    RegisterHitRemote = RegisterHitRemote or (netMod and netMod:RemoteEvent("RegisterHit", true))
+                end)
+            end
         end
     end
 end)
@@ -2369,9 +2358,14 @@ local function FormatNumber(n)
 end
 
 local function GetSafeGuiParent()
-    local success, target = pcall(function() return CoreGui end)
+    if typeof(gethui) == "function" then
+        local ok, h = pcall(gethui)
+        if ok and h then return h end
+    end
+    local success, target = pcall(function() return game:GetService("CoreGui") end)
     if success and target then return target end
-    return LocalPlayer:WaitForChild("PlayerGui")
+    local lp = game:GetService("Players").LocalPlayer
+    return (lp and lp:FindFirstChild("PlayerGui")) or LocalPlayer:WaitForChild("PlayerGui", 5)
 end
 
 -- Inventory & Milestone Checking Helpers
