@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/abhishek015807-oss/testt/refs/heads/main/banana_kaitun_bundle.lua"))()
