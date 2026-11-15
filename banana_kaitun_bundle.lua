@@ -19,6 +19,44 @@ if type(g.__BananaKaitun_Shutdown) == "function" then
     pcall(g.__BananaKaitun_Shutdown)
 end
 
+-- Initialize persistent runtime manager (File-level scope for all threads)
+local runtime = { alive = true, conns = {} }
+g.__BananaKaitun_RT = runtime
+g.__BananaKaitun_Active = true
+g.runtime = runtime
+_G.runtime = runtime
+
+function runtime.track(c)
+    if c then runtime.conns[#runtime.conns + 1] = c end
+    return c
+end
+
+g.__BananaKaitun_Shutdown = function()
+    runtime.alive = false
+    g.__BananaKaitun_Active = false
+    for _, c in ipairs(runtime.conns) do
+        pcall(function() c:Disconnect() end)
+    end
+    pcall(function()
+        if g.TweenManager and g.TweenManager.CancelCurrent then
+            g.TweenManager.CancelCurrent()
+        end
+    end)
+    pcall(function()
+        local lp = game:GetService("Players").LocalPlayer
+        local char = lp and lp.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local ff = hrp:FindFirstChild("FloatForce") or hrp:FindFirstChild("KaitunHoverForce")
+            if ff then ff:Destroy() end
+            hrp.Anchored = false
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            pcall(function() game:GetService("CollectionService"):RemoveTag(hrp, "Teleporting") end)
+        end
+    end)
+end
+
 -- Destroy existing duplicate UIs in CoreGui, PlayerGui or gethui()
 pcall(function()
     local core = (typeof(gethui) == "function" and gethui()) or game:GetService("CoreGui")
@@ -33,8 +71,6 @@ pcall(function()
         end
     end
 end)
-
-g.__BananaKaitun_Active = true
 
 -- ====================================================================
 -- DEFAULT CONFIGURATION (BANANAHUB SCHEMA SPECIFICATION)
@@ -120,45 +156,6 @@ getgenv().BananaHub = getgenv().BananaHub or getgenv().GravityHub or {
 getgenv().GravityHub = getgenv().BananaHub
 local BH = getgenv().BananaHub
 local GH = BH
-
--- Session Cleanup Guard (Clean restart, eliminates duplicate loops/tweens)
-do
-    local g = getgenv()
-    if type(g.__BananaKaitun_Shutdown) == "function" then
-        pcall(g.__BananaKaitun_Shutdown)
-    end
-    local runtime = { alive = true, conns = {} }
-    g.__BananaKaitun_RT = runtime
-    function runtime.track(c)
-        if c then runtime.conns[#runtime.conns + 1] = c end
-        return c
-    end
-    g.__BananaKaitun_Shutdown = function()
-        runtime.alive = false
-        g.__BananaKaitun_Active = false
-        for _, c in ipairs(runtime.conns) do
-            pcall(function() c:Disconnect() end)
-        end
-        pcall(function()
-            if g.TweenManager and g.TweenManager.CancelCurrent then
-                g.TweenManager.CancelCurrent()
-            end
-        end)
-        pcall(function()
-            local lp = game:GetService("Players").LocalPlayer
-            local char = lp and lp.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local ff = hrp:FindFirstChild("FloatForce") or hrp:FindFirstChild("KaitunHoverForce")
-                if ff then ff:Destroy() end
-                hrp.Anchored = false
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                hrp.AssemblyAngularVelocity = Vector3.zero
-                pcall(function() game:GetService("CollectionService"):RemoveTag(hrp, "Teleporting") end)
-            end
-        end)
-    end
-end
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -274,7 +271,7 @@ end
 -- Run Team Selector in background non-blocking so UI & services initialize instantly
 task.spawn(function()
     local waitStart = tick()
-    while runtime.alive and not LocalPlayer.Team and (tick() - waitStart < 12) do
+    while (runtime and runtime.alive) and not LocalPlayer.Team and (tick() - waitStart < 12) do
         AutoSelectTeam()
         task.wait(0.35)
     end
@@ -416,14 +413,22 @@ end)
 -- 2. REMOTES & NETWORK INITIALIZATION
 -- ====================================================================
 local CommF = nil
+local function GetCommF()
+    if CommF and CommF.Parent then return CommF end
+    pcall(function()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        CommF = (remotes and remotes:FindFirstChild("CommF_"))
+            or (ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:WaitForChild("CommF_", 3))
+            or ReplicatedStorage:FindFirstChild("CommF_")
+    end)
+    return CommF
+end
+CommF = GetCommF()
+
 local RegisterAttackRemote = nil
 local RegisterHitRemote = nil
 
 pcall(function()
-    CommF = (ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_"))
-        or ReplicatedStorage:WaitForChild("Remotes", 5) and ReplicatedStorage.Remotes:WaitForChild("CommF_", 5)
-        or ReplicatedStorage:FindFirstChild("CommF_")
-
     local modules = ReplicatedStorage:FindFirstChild("Modules") or ReplicatedStorage:WaitForChild("Modules", 5)
     if modules then
         local net = modules:FindFirstChild("Net")
@@ -456,7 +461,7 @@ local function ApplyTeleportTag()
 end
 
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(0.1)
         if TagActive and tick() >= TagExpires then
             CollectionService:RemoveTag(LocalPlayer, "Teleporting")
@@ -1029,12 +1034,16 @@ local function Attack()
         else
             local tool = char:FindFirstChildOfClass("Tool")
             if tool then tool:Activate() end
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:Button1Down(Vector2.zero)
+            end)
         end
     end)
 end
 
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(0.03)
         Attack()
     end
@@ -1239,28 +1248,32 @@ end
 
 local function HasActiveQuest()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-    if pgui then
-        local main = pgui:FindFirstChild("Main")
-        if main then
-            local qFrame = main:FindFirstChild("Quest")
-            if qFrame and qFrame.Visible then
+    if not pgui then return false end
+
+    -- 1. Check TrackedQuestFrame
+    local tqf = pgui:FindFirstChild("TrackedQuestFrame")
+    if tqf and tqf.Enabled and tqf:FindFirstChild("Frame") and tqf.Frame.Visible then
+        return true
+    end
+
+    -- 2. Check Main and Main (minimal) Quest UI
+    local main = pgui:FindFirstChild("Main") or pgui:FindFirstChild("Main (minimal)")
+    if main then
+        local qFrame = main:FindFirstChild("Quest")
+        if qFrame and qFrame.Visible then
+            local container = qFrame:FindFirstChild("Container")
+            if container then
+                local questTitle = container:FindFirstChild("QuestTitle")
+                local title = questTitle and questTitle:FindFirstChild("Title")
+                if title and title.Text and title.Text ~= "" and title.Text ~= "QUEST" then
+                    return true
+                end
+            else
                 return true
             end
         end
-        local tqf = pgui:FindFirstChild("TrackedQuestFrame")
-        if tqf and tqf.Enabled and tqf:FindFirstChild("Frame") then
-            return true
-        end
     end
-    local guide = ReplicatedStorage:FindFirstChild("GuideModule")
-    if guide then
-        pcall(function()
-            local g = require(guide)
-            if g and g.Data and g.Data.QuestData then
-                return true
-            end
-        end)
-    end
+
     return false
 end
 
@@ -1270,15 +1283,16 @@ end
 
 -- Auto Stat Allocator
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(5)
         pcall(function()
             local data = LocalPlayer:FindFirstChild("Data")
             local points = data and data:FindFirstChild("Points") and data.Points.Value or 0
-            if points > 0 and CommF then
+            local comm = GetCommF()
+            if points > 0 and comm then
                 local toAdd = math.min(points, 25)
-                CommF:InvokeServer("AddPoint", "Melee", toAdd)
-                CommF:InvokeServer("AddPoint", "Defense", toAdd)
+                comm:InvokeServer("AddPoint", "Melee", toAdd)
+                comm:InvokeServer("AddPoint", "Defense", toAdd)
             end
         end)
     end
@@ -1286,11 +1300,12 @@ end)
 
 -- Fruit Gacha, Storage & Sniper Shop
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(10)
         pcall(function()
-            if CommF then
-                CommF:InvokeServer("Cousin", "Buy")
+            local comm = GetCommF()
+            if comm then
+                comm:InvokeServer("Cousin", "Buy")
                 local bp = LocalPlayer.Backpack
                 local char = LocalPlayer.Character
                 for _, container in ipairs({ bp, char }) do
@@ -1299,7 +1314,7 @@ task.spawn(function()
                             if tool:IsA("Tool") and tool.Name:find("Fruit") and not tool:FindFirstChild("Stored") then
                                 local clean = tool.Name:gsub(" Fruit", "")
                                 local orig = tool:GetAttribute("OriginalName") or (clean .. "-" .. clean)
-                                CommF:InvokeServer("StoreFruit", orig, tool)
+                                comm:InvokeServer("StoreFruit", orig, tool)
                                 local t = Instance.new("BoolValue", tool)
                                 t.Name = "Stored"
                             end
@@ -1312,7 +1327,7 @@ task.spawn(function()
                 if sniper and sniper["Enabled"] and sniper["Fruit"] then
                     for _, fruitName in ipairs(sniper["Fruit"]) do
                         pcall(function()
-                            CommF:InvokeServer("BuyFruit", fruitName)
+                            comm:InvokeServer("BuyFruit", fruitName)
                         end)
                     end
                 end
@@ -1323,15 +1338,16 @@ end)
 
 -- Buy Haki Engine (Enhancement, Skyjump, Flash Step, Observation)
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(15)
         pcall(function()
             local haki = GH["Buy Haki"]
-            if haki and CommF then
-                if haki["Skyjump"] then CommF:InvokeServer("BuyHaki", "Geppo") end
-                if haki["Enhancement"] then CommF:InvokeServer("Buso") end
-                if haki["Flash Step"] then CommF:InvokeServer("BuyHaki", "Soru") end
-                if haki["Observation"] then CommF:InvokeServer("KenTalk", "Buy") end
+            local comm = GetCommF()
+            if haki and comm then
+                if haki["Skyjump"] then comm:InvokeServer("BuyHaki", "Geppo") end
+                if haki["Enhancement"] then comm:InvokeServer("Buso") end
+                if haki["Flash Step"] then comm:InvokeServer("BuyHaki", "Soru") end
+                if haki["Observation"] then comm:InvokeServer("KenTalk", "Buy") end
             end
         end)
     end
@@ -1339,7 +1355,7 @@ end)
 
 -- Auto Chat
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(20)
         pcall(function()
             local ac = GH["Auto Chat"]
@@ -2753,7 +2769,7 @@ local function CreateHUD()
 
         -- TELEMETRY & STATUS REFRESH LOOP
         task.spawn(function()
-            while runtime.alive do
+            while (runtime and runtime.alive) do
                 task.wait(1)
                 pcall(function()
                     local d = LocalPlayer:FindFirstChild("Data")
@@ -2836,23 +2852,24 @@ CreateHUD()
 -- 13. MASTER AUTONOMOUS PROGRESSION LOOP (1 TO MAX 2550+)
 -- ====================================================================
 task.spawn(function()
-    while runtime.alive do
+    while (runtime and runtime.alive) do
         task.wait(0.1)
         pcall(function()
+            local comm = GetCommF()
             local data = LocalPlayer:FindFirstChild("Data")
             local level = data and data:FindFirstChild("Level") and data.Level.Value or 1
             local currentSea = Data.GetSea()
 
             -- Sea 1 -> 2 Transition
-            if currentSea == 1 and level >= 700 and CommF then
-                local prog = CommF:InvokeServer("DressrosaQuestProgress", "Dressrosa")
+            if currentSea == 1 and level >= 700 and comm then
+                local prog = comm:InvokeServer("DressrosaQuestProgress", "Dressrosa")
                 if prog ~= 0 then
                     HUDStatus = "Unlocking Sea 2 (Detective & Ice Admiral)"
                     local iceDoor = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Ice") and Workspace.Map.Ice:FindFirstChild("Door")
                     if iceDoor and iceDoor.CanCollide then
                         toTarget(CFrame.new(4852.28, 5.65, 718.53), 5)
                         task.wait(0.5)
-                        CommF:InvokeServer("DressrosaQuestProgress", "Detective")
+                        comm:InvokeServer("DressrosaQuestProgress", "Detective")
                     else
                         local enemies = Workspace:FindFirstChild("Enemies")
                         local iceAdmiral = enemies and enemies:FindFirstChild("Ice Admiral")
@@ -2871,17 +2888,17 @@ task.spawn(function()
                     end
                 else
                     HUDStatus = "Traveling to Sea 2 (Dressrosa)"
-                    CommF:InvokeServer("TravelDressrosa")
+                    comm:InvokeServer("TravelDressrosa")
                     return
                 end
             end
 
             -- Sea 2 -> 3 Transition
-            if currentSea == 2 and level >= 1500 and CommF then
-                local zCheck = CommF:InvokeServer("ZQuestProgress", "Check")
+            if currentSea == 2 and level >= 1500 and comm then
+                local zCheck = comm:InvokeServer("ZQuestProgress", "Check")
                 if zCheck == 1 then
                     HUDStatus = "Traveling to Sea 3 (Zou)"
-                    CommF:InvokeServer("TravelZou")
+                    comm:InvokeServer("TravelZou")
                     return
                 end
             end
@@ -2925,8 +2942,8 @@ task.spawn(function()
                 end)
                 toTarget(targetQ, 8)
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 35 and CommF then
-                    CommF:InvokeServer("StartQuest", quest.Quest, quest.Id)
+                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 35 and comm then
+                    comm:InvokeServer("StartQuest", quest.Quest, quest.Id)
                     task.wait(0.3)
                 end
             else
