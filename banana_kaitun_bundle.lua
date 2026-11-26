@@ -502,7 +502,7 @@ local function EnsureCombatRemotes()
             for _, folderName in ipairs({ "Util", "Common", "Remotes", "Assets", "FX" }) do
                 local folder = ReplicatedStorage:FindFirstChild(folderName)
                 if folder then
-                    for _, child in ipairs(folder:GetChildren()) do
+                    for _, child in ipairs(folder:GetDescendants()) do
                         local attrId = child:IsA("RemoteEvent") and child:GetAttribute("Id")
                         if attrId then
                             CombatNet.EncRemote = child
@@ -954,53 +954,29 @@ local function toTarget(targetCF, snapThreshold, customSpeed)
 
     local placeId = game.PlaceId
     local isSea1 = (placeId == 2753915549 or placeId == 85211729168715)
+    local isSea2 = (placeId == 4442272183 or placeId == 79091703265657)
     local isSea3 = (placeId == 7449423635 or placeId == 100117331123089)
 
-    -- Sea 1 Skylands (Upper <-> Lower)
+    -- Sea 1 Underwater City (via Whirlpool portal) & dynamic TeleportSpawn if beneficial
     if isSea1 then
-        if hPos.Y > 3000 and pPos.Y < 2500 and (pPos - Vector3.new(-7894, 5547, -380)).Magnitude > 1000 then
-            local exitCF = CFrame.new(-7894, 5547, -380)
-            if (hPos - exitCF.Position).Magnitude > 50 then
-                B(hrp, exitCF, 350, 12)
-                return
-            else
-                if comm then comm:InvokeServer("requestEntrance", Vector3.new(-4607, 874, -1667)) end
-                TweenManager.CancelCurrent()
-                task.wait(0.5)
-                return
-            end
-        elseif hPos.Y < 2500 and pPos.Y > 3000 then
-            local enterCF = CFrame.new(-4607, 874, -1667)
-            if (hPos - enterCF.Position).Magnitude > 50 then
-                B(hrp, enterCF, 350, 12)
-                return
-            else
-                if comm then comm:InvokeServer("requestEntrance", Vector3.new(-7894, 5547, -380)) end
-                TweenManager.CancelCurrent()
-                task.wait(0.5)
-                return
-            end
-        end
-
-        -- Sea 1 Underwater City
         if hPos.X > 50000 and pPos.X < 50000 then
-            local exitCF = CFrame.new(61163, 11, 1819)
-            if (hPos - exitCF.Position).Magnitude > 50 then
+            local exitCF = CFrame.new(61163.85, 11.76, 1819.78)
+            if (hPos - exitCF.Position).Magnitude > 60 then
                 B(hrp, exitCF, 350, 12)
                 return
             else
-                if comm then comm:InvokeServer("requestEntrance", Vector3.new(4050, -1, -1814)) end
+                if comm then comm:InvokeServer("requestEntrance", Vector3.new(3864.68, 6.74, -1926.21)) end
                 TweenManager.CancelCurrent()
                 task.wait(0.5)
                 return
             end
         elseif hPos.X < 50000 and pPos.X > 50000 then
-            local enterCF = CFrame.new(4050, -1, -1814)
-            if (hPos - enterCF.Position).Magnitude > 50 then
+            local enterCF = CFrame.new(4050.31, 5, -1814.12)
+            if (hPos - enterCF.Position).Magnitude > 60 then
                 B(hrp, enterCF, 350, 12)
                 return
             else
-                if comm then comm:InvokeServer("requestEntrance", Vector3.new(61163, 11, 1819)) end
+                if comm then comm:InvokeServer("requestEntrance", Vector3.new(61163.85, 11.76, 1819.78)) end
                 TweenManager.CancelCurrent()
                 task.wait(0.5)
                 return
@@ -1008,7 +984,48 @@ local function toTarget(targetCF, snapThreshold, customSpeed)
         end
     end
 
-    -- Sea 3 Temple of Time & Submerged Island
+    -- Sea 2 Cursed Ship (Lv 1250-1349) & Don Swan Room portals
+    if isSea2 then
+        if hPos.Z < 20000 and pPos.Z > 25000 then
+            local shipDock = CFrame.new(-6496.89, 89.03, -116.51)
+            if (hPos - shipDock.Position).Magnitude > 60 then
+                B(hrp, shipDock, 350, 12)
+                return
+            else
+                if comm then comm:InvokeServer("requestEntrance", Vector3.new(923.2125, 126.976, 32852.832)) end
+                TweenManager.CancelCurrent()
+                task.wait(0.5)
+                return
+            end
+        elseif hPos.Z > 25000 and pPos.Z < 20000 then
+            local shipExit = CFrame.new(920.48, 154.9, 32838.96)
+            if (hPos - shipExit.Position).Magnitude > 60 then
+                B(hrp, shipExit, 350, 12)
+                return
+            else
+                if comm then comm:InvokeServer("requestEntrance", Vector3.new(-6508.558, 89.035, -132.840)) end
+                TweenManager.CancelCurrent()
+                task.wait(0.5)
+                return
+            end
+        end
+
+        local targetInSwan = (pPos.X > 1800 and pPos.X < 2600 and pPos.Z > 700 and pPos.Z < 1200)
+        local playerInSwan = (hPos.X > 1800 and hPos.X < 2600 and hPos.Z > 700 and hPos.Z < 1200)
+        if targetInSwan and not playerInSwan then
+            if comm then comm:InvokeServer("requestEntrance", Vector3.new(2284.912, 15.152, 905.483)) end
+            TweenManager.CancelCurrent()
+            task.wait(0.4)
+            return
+        elseif playerInSwan and not targetInSwan then
+            if comm then comm:InvokeServer("requestEntrance", Vector3.new(-288.462, 306.131, 597.999)) end
+            TweenManager.CancelCurrent()
+            task.wait(0.4)
+            return
+        end
+    end
+
+    -- Sea 3 Temple of Time, Submerged Island & Direct Portals
     if isSea3 then
         local totPos = Vector3.new(28609.39, 14896.53, 106.42)
         if (pPos - totPos).Magnitude > 3000 and (totPos - hPos).Magnitude <= 3000 then
@@ -1021,18 +1038,57 @@ local function toTarget(targetCF, snapThreshold, customSpeed)
             return
         end
 
-        local subPos = Vector3.new(11538.60, -2154.70, 9827.31)
-        if (pPos - subPos).Magnitude <= 3000 and (subPos - hPos).Magnitude > 3000 then
+        local targetSub = (pPos.Y < -1000)
+        local playerSub = (hPos.Y < -1000)
+        if targetSub and not playerSub then
             local subEntrance = CFrame.new(-16269.41, 23.98, 1371.66)
-            B(hrp, subEntrance, 350, 8)
-            if (subEntrance.Position - hPos).Magnitude < 8 then
+            if (subEntrance.Position - hPos).Magnitude > 15 then
+                B(hrp, subEntrance, 350, 8)
+            else
                 local net = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
                 local rf = net and net:FindFirstChild("RF/SubmarineWorkerSpeak")
                 if rf then rf:InvokeServer("TravelToSubmergedIsland") end
                 if comm then comm:InvokeServer("SetLastSpawnPoint", "SubmergedIsland") end
                 TweenManager.CancelCurrent()
+                task.wait(0.5)
             end
             return
+        elseif playerSub and not targetSub then
+            local subExitSpot = CFrame.new(10800.0, -2085.0, 9265.0)
+            local net = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+            local rf = net and net:FindFirstChild("RF/SubmarineWorkerSpeak")
+            if rf then
+                pcall(function() rf:InvokeServer("TravelToTikiOutpost") end)
+            end
+            if comm then
+                pcall(function() comm:InvokeServer("requestEntrance", Vector3.new(-5050, 315, -3150)) end)
+            end
+            if (hrp.Position - subExitSpot.Position).Magnitude > 15 then
+                B(hrp, subExitSpot, 350, 10)
+            end
+            return
+        end
+
+        if currentDist > 3000 and comm then
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+            local ch = LocalPlayer.Character
+            local hasValk = (bp and bp:FindFirstChild("Valkyrie Helm")) or (ch and ch:FindFirstChild("Valkyrie Helm"))
+            if hasValk then
+                for _, port in ipairs({
+                    Vector3.new(-12500, 337, -7480),
+                    Vector3.new(5710, 1015, -255),
+                    Vector3.new(-5050, 315, -3150),
+                }) do
+                    if (pPos - port).Magnitude < 2600 and (hPos - port).Magnitude > 2600 then
+                        local okPort = pcall(function() comm:InvokeServer("requestEntrance", port) end)
+                        if okPort then
+                            TweenManager.CancelCurrent()
+                            task.wait(0.4)
+                            return
+                        end
+                    end
+                end
+            end
         end
     end
 
@@ -1102,7 +1158,15 @@ local function IsValidCombatTool(tool)
     if tt == Combat.PreferredWeapon or wt == Combat.PreferredWeapon then
         return true
     end
-    return (tt == "Melee" or tt == "Sword" or wt == "Melee" or wt == "Sword")
+    if tt == "Melee" or tt == "Sword" or wt == "Melee" or wt == "Sword" then
+        return true
+    end
+    return (tt == "" or tt == nil)
+        and (wt == nil or wt == "")
+        and not tool:FindFirstChild("EatRemote", true)
+        and tool.ToolTip ~= "Gun"
+        and tool.ToolTip ~= "Blox Fruit"
+        and not tool.Name:find("Fruit")
 end
 
 local function EquipWeapon()
@@ -1296,7 +1360,7 @@ local function Attack()
         local primaryMob = hitTargets[1][1]
         local primaryPart = hitTargets[1][2]
 
-        -- Damage watchdog: cycle combat channel & trigger M1 click if target HP stalls
+        -- Damage watchdog: cycle broken combat channel & trigger M1 click if target HP stalls
         local targetHum = primaryMob and primaryMob:FindFirstChildOfClass("Humanoid")
         local curHP = targetHum and targetHum.Health
         local needsFallbackClick = false
@@ -1310,9 +1374,13 @@ local function Attack()
                 CombatNet.LastDamageAt = tick()
             elseif (tick() - CombatNet.LastDamageAt) > 1.8 then
                 CombatNet.LastDamageAt = tick()
-                CombatNet.SendHitsFn = nil
-                CombatNet.SkipSendHitsUntil = tick() + 10
-                CombatNet.SeedValue = nil
+                if CombatNet.LastChannel == "EncRemote" then
+                    CombatNet.SkipEncUntil = tick() + 4
+                    CombatNet.SeedValue = nil
+                elseif CombatNet.LastChannel == "SendHits" then
+                    CombatNet.SendHitsFn = nil
+                    CombatNet.SkipSendHitsUntil = tick() + 60
+                end
                 needsFallbackClick = true
             end
         end
@@ -1333,21 +1401,8 @@ local function Attack()
         local sentAny = false
 
         -- Fire ONE primary hit channel per swing to stay under server rate limits
-        -- 1) Prefer Native SendHitsToServer when captured and healthy
-        if tick() >= (CombatNet.SkipSendHitsUntil or 0) then
-            local sendFn = ResolveSendHitsToServer()
-            if sendFn then
-                if CallAsGameThread(sendFn, primaryPart, hitTargets) then
-                    sentAny = true
-                else
-                    CombatNet.SendHitsFn = nil
-                    CombatNet.SkipSendHitsUntil = tick() + 10
-                end
-            end
-        end
-
-        -- 2) Else try Encrypted Seeded Remote (2025/2026 Blox Fruits update)
-        if not sentAny then
+        -- 1) Prefer Encrypted Seeded Remote (2025/2026 Blox Fruits update; works without setthreadidentity)
+        if tick() >= (CombatNet.SkipEncUntil or 0) then
             local seedVal = RefreshCombatSeedAsync()
             if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil then
                 local encOk = pcall(function()
@@ -1358,7 +1413,24 @@ local function Attack()
                     local remoteObj = (typeof(cloneref) == "function" and cloneref(CombatNet.EncRemote)) or CombatNet.EncRemote
                     remoteObj:FireServer(encName, bit32.bxor(CombatNet.EncId + 909090, seedVal * 2), primaryPart, hitTargets)
                 end)
-                if encOk then sentAny = true end
+                if encOk then
+                    sentAny = true
+                    CombatNet.LastChannel = "EncRemote"
+                end
+            end
+        end
+
+        -- 2) Else try Native SendHitsToServer when captured and healthy
+        if (not sentAny) and tick() >= (CombatNet.SkipSendHitsUntil or 0) then
+            local sendFn = ResolveSendHitsToServer()
+            if sendFn then
+                if CallAsGameThread(sendFn, primaryPart, hitTargets) then
+                    sentAny = true
+                    CombatNet.LastChannel = "SendHits"
+                else
+                    CombatNet.SendHitsFn = nil
+                    CombatNet.SkipSendHitsUntil = tick() + 60
+                end
             end
         end
 
@@ -1371,6 +1443,7 @@ local function Attack()
             end
             RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, CombatNet.HitToken)
             sentAny = true
+            CombatNet.LastChannel = "RegisterHit"
         end
 
         if (not sentAny) or needsFallbackClick then
@@ -1512,12 +1585,13 @@ Data.Quests = {
 	{ Min = 2325, Max = 2349, Quest = "ChocQuest1", Id = 2, Mob = "Chocolate Bar Battler", PosQ = CFrame.new(233.22836303711, 29.876001358032, -12201.233398438), PosM = CFrame.new(582.59057617188, 77.188095092773, -12463.162109375) },
 	{ Min = 2350, Max = 2374, Quest = "ChocQuest2", Id = 1, Mob = "Sweet Thief", PosQ = CFrame.new(150.50663757324, 30.693693161011, -12774.502929688), PosM = CFrame.new(165.1884765625, 76.058853149414, -12600.836914062) },
 	{ Min = 2375, Max = 2399, Quest = "ChocQuest2", Id = 2, Mob = "Candy Rebel", PosQ = CFrame.new(150.50663757324, 30.693693161011, -12774.502929688), PosM = CFrame.new(134.86563110352, 77.247680664062, -12876.547851562) },
-	{ Min = 2400, Max = 2449, Quest = "CandyQuest1", Id = 1, Mob = "Candy Pirate", PosQ = CFrame.new(-1150.0400390625, 20.378934860229, -14446.334960938), PosM = CFrame.new(-1310.5003662109, 26.016523361206, -14562.404296875) },
+	{ Min = 2400, Max = 2424, Quest = "CandyQuest1", Id = 1, Mob = "Candy Pirate", PosQ = CFrame.new(-1150.0400390625, 20.378934860229, -14446.334960938), PosM = CFrame.new(-1310.5003662109, 26.016523361206, -14562.404296875) },
+	{ Min = 2425, Max = 2449, Quest = "CandyQuest1", Id = 2, Mob = "Snow Demon", PosQ = CFrame.new(-1150.0400390625, 20.378934860229, -14446.334960938), PosM = CFrame.new(-936.15, 14.0, -14552.5) },
 	{ Min = 2450, Max = 2474, Quest = "TikiQuest1", Id = 1, Mob = "Isle Outlaw", PosQ = CFrame.new(-16548.8164, 55.6059914, -172.8125), PosM = CFrame.new(-16479.900390625, 226.6117401123, -300.31143188477) },
 	{ Min = 2475, Max = 2499, Quest = "TikiQuest1", Id = 2, Mob = "Island Boy", PosQ = CFrame.new(-16548.8164, 55.6059914, -172.8125), PosM = CFrame.new(-16849.396484375, 192.86505126953, -150.78532409668) },
 	{ Min = 2500, Max = 2524, Quest = "TikiQuest2", Id = 1, Mob = "Sun-kissed Warrior", PosQ = CFrame.new(-16538, 55, 1049), PosM = CFrame.new(-16347, 64, 984) },
-	{ Min = 2525, Max = 2550, Quest = "TikiQuest2", Id = 2, Mob = "Isle Champion", PosQ = CFrame.new(-16541.0215, 57.3082275, 1051.46118), PosM = CFrame.new(-16602.1015625, 130.38734436035, 1087.2456054688) },
-	{ Min = 2551, Max = 2574, Quest = "TikiQuest3", Id = 1, Mob = "Serpent Hunter", PosQ = CFrame.new(-16668.03, 105.32, 1568.6), PosM = CFrame.new(-16645.64, 163.09, 1352.87) },
+	{ Min = 2525, Max = 2549, Quest = "TikiQuest2", Id = 2, Mob = "Isle Champion", PosQ = CFrame.new(-16541.0215, 57.3082275, 1051.46118), PosM = CFrame.new(-16602.1015625, 130.38734436035, 1087.2456054688) },
+	{ Min = 2550, Max = 2574, Quest = "TikiQuest3", Id = 1, Mob = "Serpent Hunter", PosQ = CFrame.new(-16668.03, 105.32, 1568.6), PosM = CFrame.new(-16645.64, 163.09, 1352.87) },
 	{ Min = 2575, Max = 2599, Quest = "TikiQuest3", Id = 2, Mob = "Skull Slayer", PosQ = CFrame.new(-16668.03, 105.32, 1568.6), PosM = CFrame.new(-16709.49, 419.68, 1751.09) },
 	{ Min = 2600, Max = 2624, Quest = "SubmergedQuest1", Id = 1, Mob = "Reef Bandit", PosQ = CFrame.new(10778.875, -2087.72437, 9265.18359), PosM = CFrame.new(11019.1318, -2146.06812, 9342.3916) },
 	{ Min = 2625, Max = 2649, Quest = "SubmergedQuest1", Id = 2, Mob = "Coral Pirate", PosQ = CFrame.new(10778.875, -2087.72437, 9265.18359), PosM = CFrame.new(10808.6006, -2030.36145, 9364.2334) },
@@ -1526,6 +1600,34 @@ Data.Quests = {
 	{ Min = 2700, Max = 2724, Quest = "SubmergedQuest3", Id = 1, Mob = "High Disciple", PosQ = CFrame.new(9640.08789, -1992.44507, 9613.65234), PosM = CFrame.new(9750.41602, -1966.93884, 9753.36035) },
 	{ Min = 2725, Max = 9999, Quest = "SubmergedQuest3", Id = 2, Mob = "Grand Devotee", PosQ = CFrame.new(9640.08789, -1992.44507, 9613.65234), PosM = CFrame.new(9611.70508, -1993.47119, 9882.68848) },
 }
+
+local SubmergedUnlockCache = { Checked = false, Unlocked = false, At = 0 }
+local function IsSubmergedUnlocked()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp.Position.Y < -1000 then
+        SubmergedUnlockCache.Unlocked = true
+        SubmergedUnlockCache.Checked = true
+        return true
+    end
+    if SubmergedUnlockCache.Checked and SubmergedUnlockCache.Unlocked then
+        return true
+    end
+    if (tick() - SubmergedUnlockCache.At) < 15 then
+        return SubmergedUnlockCache.Unlocked
+    end
+    SubmergedUnlockCache.At = tick()
+    SubmergedUnlockCache.Checked = true
+    pcall(function()
+        local net = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+        local rf = net and net:FindFirstChild("RF/SubmarineWorkerSpeak")
+        if rf then
+            local res = rf:InvokeServer("AskKilledTikiBoss")
+            SubmergedUnlockCache.Unlocked = (res == true)
+        end
+    end)
+    return SubmergedUnlockCache.Unlocked
+end
 
 function Data.GetSea()
     local placeId = game.PlaceId
@@ -1542,6 +1644,8 @@ function Data.GetQuest(lvl)
         lvl = 650
     elseif currentSea == 2 and lvl >= 1500 then
         lvl = 1450
+    elseif currentSea == 3 and lvl >= 2600 and not IsSubmergedUnlocked() then
+        lvl = 2575
     end
     for _, q in ipairs(Data.Quests) do
         if lvl >= q.Min and lvl <= q.Max then
@@ -1601,7 +1705,52 @@ local function CollectVisibleGuiText(rootGui)
     return table.concat(parts, " ")
 end
 
+local GuideCache = { Mod = nil, Tried = false }
+local function GetGuideData()
+    if not GuideCache.Tried then
+        GuideCache.Tried = true
+        pcall(function()
+            local gm = ReplicatedStorage:FindFirstChild("GuideModule")
+            if gm and typeof(require) == "function" then
+                GuideCache.Mod = require(gm)
+            end
+        end)
+    end
+    return GuideCache.Mod and GuideCache.Mod.Data
+end
+
+local function GetLiveQuestNPCCF(questName, questLevel)
+    local gd = GetGuideData()
+    local npcList = gd and gd.NPCList
+    if type(npcList) == "table" then
+        local fallbackPos = nil
+        for _, info in pairs(npcList) do
+            if type(info) == "table" and info.InternalQuestName == questName and info.Position then
+                local pos = typeof(info.Position) == "CFrame" and info.Position.Position or info.Position
+                if typeof(pos) == "Vector3" then
+                    if info.Levels and questLevel and table.find(info.Levels, questLevel) then
+                        return CFrame.new(pos)
+                    end
+                    fallbackPos = fallbackPos or CFrame.new(pos)
+                end
+            end
+        end
+        if fallbackPos then return fallbackPos end
+    end
+    return nil
+end
+
 local function GetActiveQuestState()
+    -- 0. Prefer GuideModule.Data.QuestData directly from game state (no plural/UI quirks)
+    local gd = GetGuideData()
+    local qData = gd and gd.QuestData
+    if type(qData) == "table" and type(qData.Task) == "table" then
+        local mobKey, rem = next(qData.Task)
+        if mobKey and (tonumber(rem) or 0) > 0 then
+            return true, tostring(mobKey)
+        end
+    end
+
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     if not pgui then return false, nil end
 
@@ -1651,18 +1800,23 @@ end
 -- 9. BANANAHUB BACKGROUND SERVICES (FRUIT SNIPER, AUTO CHAT, HAKI)
 -- ====================================================================
 
--- Auto Stat Allocator
+-- Auto Stat Allocator (Melee & Defense first, then Sword once capped)
 task.spawn(function()
     while (runtime and runtime.alive) do
-        task.wait(5)
+        task.wait(3)
         pcall(function()
             local data = LocalPlayer:FindFirstChild("Data")
-            local points = data and data:FindFirstChild("Points") and data.Points.Value or 0
+            local pointsVal = data and data:FindFirstChild("Points")
+            local points = pointsVal and pointsVal.Value or 0
             local comm = GetCommF()
             if points > 0 and comm then
                 local toAdd = math.min(points, 25)
                 comm:InvokeServer("AddPoint", "Melee", toAdd)
                 comm:InvokeServer("AddPoint", "Defense", toAdd)
+                local remPoints = pointsVal and pointsVal.Value or 0
+                if remPoints == points then
+                    comm:InvokeServer("AddPoint", "Sword", math.min(remPoints, 25))
+                end
             end
         end)
     end
@@ -1799,40 +1953,40 @@ function Race.DoRaceV2()
         return true
     elseif state == 1 then
         if not HasItem("Flower 1") then
-            if Workspace:FindFirstChild("Flower1") then
-                toTarget(Workspace.Flower1.CFrame, 3)
-            else
-                toTarget(CFrame.new(-5497.06, 47.59, -795.14), 10)
+            local f1 = Workspace:FindFirstChild("Flower1")
+            if f1 and f1.Transparency < 1 then
+                toTarget(f1.CFrame, 3)
+                return true
             end
-            return true
         elseif not HasItem("Flower 2") then
-            if Workspace:FindFirstChild("Flower2") then
-                toTarget(Workspace.Flower2.CFrame, 3)
-            else
-                toTarget(CFrame.new(-429.54, 71.76, 1836.18), 10)
+            local f2 = Workspace:FindFirstChild("Flower2")
+            if f2 and f2.Transparency < 1 then
+                toTarget(f2.CFrame, 3)
+                return true
             end
-            return true
         elseif not HasItem("Flower 3") then
-            local enemies = Workspace:FindFirstChild("Enemies")
-            local mob = enemies and enemies:FindFirstChild("Swan Pirate")
-            if mob and IsMobAlive(mob) then
-                local root = mob:FindFirstChild("HumanoidRootPart")
-                if root then
-                    toTarget(GetFarmCFrame(root), 5)
-                    BringMob(mob)
-                    EquipWeapon()
+            if HasItem("Flower 1") and HasItem("Flower 2") then
+                local enemies = Workspace:FindFirstChild("Enemies")
+                local mob = enemies and enemies:FindFirstChild("Swan Pirate")
+                if mob and IsMobAlive(mob) then
+                    local root = mob:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        toTarget(GetFarmCFrame(root), 5)
+                        BringMob(mob)
+                        EquipWeapon()
+                        return true
+                    end
                 end
-            else
-                toTarget(CFrame.new(878.01, 121.36, 1212.18), 10)
             end
-            return true
         end
+        return false
     elseif state == 2 then
         if GetPlayerBeli() >= 500000 then
             toTarget(Race.AlchemistCF, 6)
             CommF:InvokeServer("Alchemist", "3")
+            return true
         end
-        return true
+        return false
     end
     return false
 end
@@ -1887,9 +2041,12 @@ end
 
 function Race.CheckTempleUnlock()
     if not CommF or not HasItem("Valkyrie Helm") or not HasItem("Mirror Fractal") then return false end
-    if CommF:InvokeServer("CheckTempleDoor") then return true end
+    local unlocked = false
+    pcall(function() unlocked = CommF:InvokeServer("CheckTempleDoor") == true end)
+    if unlocked then return false end
 
-    local step = CommF:InvokeServer("RaceV4Progress", "Check")
+    local step = nil
+    pcall(function() step = CommF:InvokeServer("RaceV4Progress", "Check") end)
     if step == 1 then
         CommF:InvokeServer("RaceV4Progress", "Begin")
         return true
@@ -1948,8 +2105,7 @@ function Race.DoPullLever()
 
     local temple = GetTemple()
     if not temple then
-        toTarget(Race.TempleOfTimeCF, 10)
-        return true
+        return false
     end
 
     local leverModel = temple:FindFirstChild("Lever")
@@ -2181,13 +2337,15 @@ end
 -- ====================================================================
 -- 1. AUTO SABER QUEST (SEA 1 - FULL PUZZLE & SABER EXPERT)
 -- ====================================================================
+local SaberPuzzleState = { PlatesDone = false, LastYamaTry = 0, LastSoulGuitarTry = 0 }
+
 function SecretQuests.DoSaber()
     if not SecretQuests.AutoSaber or not CommF or Data.GetSea() ~= 1 or HasItem("Saber") then return false end
     local d = LocalPlayer:FindFirstChild("Data")
     local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
     if lvl < 200 then return false end
 
-    -- Check if Saber Expert is alive
+    -- Check if Saber Expert is alive right now
     local saberExpert = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Saber Expert")
     if saberExpert and IsMobAlive(saberExpert) then
         local mRoot = saberExpert:FindFirstChild("HumanoidRootPart")
@@ -2200,47 +2358,18 @@ function SecretQuests.DoSaber()
         end
     end
 
-    -- Step 1: Jungle Plates (5 Buttons)
-    local plates = {
-        CFrame.new(-1612.56, 36.98, 148.72),
-        CFrame.new(-1480.95, 23.51, 38.64),
-        CFrame.new(-1390.87, 23.51, -112.58),
-        CFrame.new(-1497.63, 23.51, -215.45),
-        CFrame.new(-1645.24, 23.51, -195.42)
-    }
-    for _, plateCF in ipairs(plates) do
-        toTarget(plateCF, 3)
-        task.wait(0.2)
+    -- Check RichSon first so already-progressed players don't re-run Jungle plates every tick
+    local richSonProgress = nil
+    pcall(function() richSonProgress = CommF:InvokeServer("ProQuestProgress", "RichSon") end)
+
+    if HasItem("Relic") then
+        local jungleAltar = CFrame.new(-1404.92, 29.98, 3.81)
+        toTarget(jungleAltar, 5)
+        pcall(function() CommF:InvokeServer("ProQuestProgress", "PlaceRelic") end)
+        task.wait(0.5)
+        return true
     end
 
-    -- Step 2: Grab Torch & Burn Desert Door
-    if not HasItem("Torch") and not HasItem("Cup") and not HasItem("Relic") then
-        local torchHole = CFrame.new(-1610.01, 11.50, 164.00)
-        toTarget(torchHole, 5)
-        task.wait(0.5)
-    end
-
-    if HasItem("Torch") then
-        local desertHouse = CFrame.new(1114.61, 5.05, 4350.23)
-        toTarget(desertHouse, 5)
-        EquipWeapon()
-        task.wait(0.5)
-    end
-
-    -- Step 3: Fill Cup at Frozen Village & Help Sick Man
-    if HasItem("Cup") then
-        local icicleCave = CFrame.new(1398.54, 37.35, -1320.12)
-        toTarget(icicleCave, 5)
-        pcall(function() CommF:InvokeServer("ProQuestProgress", "FillCup", LocalPlayer.Character.Cup) end)
-        task.wait(0.5)
-        local sickMan = CFrame.new(1390.95, 37.35, -1350.50)
-        toTarget(sickMan, 5)
-        pcall(function() CommF:InvokeServer("ProQuestProgress", "SickMan") end)
-        task.wait(0.5)
-    end
-
-    -- Step 4: Mob Leader & Relic
-    local richSonProgress = CommF:InvokeServer("ProQuestProgress", "RichSon")
     if richSonProgress == 0 then
         local mobLeader = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Mob Leader")
         if mobLeader and IsMobAlive(mobLeader) then
@@ -2252,22 +2381,54 @@ function SecretQuests.DoSaber()
                 EquipWeapon()
                 return true
             end
-        else
-            toTarget(CFrame.new(-2967.60, -4.91, 5328.71), 5)
-            return true
         end
+        -- Do not stall leveling waiting on Mob Leader respawn
+        return false
     elseif richSonProgress == 1 then
         pcall(function() CommF:InvokeServer("ProQuestProgress", "RichSon") end)
-        task.wait(0.5)
+        task.wait(0.35)
+        return false
     end
 
-    -- Step 5: Insert Relic into Jungle Altar
-    if HasItem("Relic") then
-        local jungleAltar = CFrame.new(-1404.92, 29.98, 3.81)
-        toTarget(jungleAltar, 5)
-        pcall(function() CommF:InvokeServer("ProQuestProgress", "PlaceRelic") end)
-        task.wait(0.5)
+    if HasItem("Cup") then
+        local icicleCave = CFrame.new(1398.54, 37.35, -1320.12)
+        toTarget(icicleCave, 5)
+        local cupTool = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Cup")) or (LocalPlayer:FindFirstChild("Backpack") and LocalPlayer.Backpack:FindFirstChild("Cup"))
+        if cupTool then
+            pcall(function() CommF:InvokeServer("ProQuestProgress", "FillCup", cupTool) end)
+        end
+        task.wait(0.4)
+        local sickMan = CFrame.new(1390.95, 37.35, -1350.50)
+        toTarget(sickMan, 5)
+        pcall(function() CommF:InvokeServer("ProQuestProgress", "SickMan") end)
+        task.wait(0.4)
         return true
+    end
+
+    if HasItem("Torch") then
+        local desertHouse = CFrame.new(1114.61, 5.05, 4350.23)
+        toTarget(desertHouse, 5)
+        EquipWeapon()
+        task.wait(0.4)
+        return true
+    end
+
+    -- Step 1: Jungle Plates once per session when near Jungle or first Lv 200 pass
+    if not SaberPuzzleState.PlatesDone then
+        SaberPuzzleState.PlatesDone = true
+        local plates = {
+            CFrame.new(-1612.56, 36.98, 148.72),
+            CFrame.new(-1480.95, 23.51, 38.64),
+            CFrame.new(-1390.87, 23.51, -112.58),
+            CFrame.new(-1497.63, 23.51, -215.45),
+            CFrame.new(-1645.24, 23.51, -195.42)
+        }
+        for _, plateCF in ipairs(plates) do
+            toTarget(plateCF, 3)
+            task.wait(0.2)
+        end
+        toTarget(CFrame.new(-1610.01, 11.50, 164.00), 5)
+        task.wait(0.4)
     end
 
     return false
@@ -2278,6 +2439,9 @@ end
 -- ====================================================================
 function SecretQuests.DoValkyrieHelm()
     if not SecretQuests.AutoValkyrie or not CommF or Data.GetSea() ~= 3 or HasItem("Valkyrie Helm") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 1800 then return false end
 
     -- Check if rip_indra True Form is alive
     local indra = Workspace:FindFirstChild("Enemies") and (Workspace.Enemies:FindFirstChild("rip_indra True Form") or Workspace.Enemies:FindFirstChild("rip_indra"))
@@ -2305,8 +2469,8 @@ function SecretQuests.DoValkyrieHelm()
         return true
     end
 
-    -- Server Hop if configured
-    if GH["Select Hop"] and GH["Select Hop"]["Hop Find Rip Indra Get Valkyrie Helm or Get Tushita"] and not indra and not HasItem("God's Chalice") then
+    -- Only server hop for Rip Indra after reaching max-tier endgame level (or explicit Hop Before Max)
+    if (lvl >= 2550 or GH["Hop Before Max"] == true) and GH["Select Hop"] and GH["Select Hop"]["Hop Find Rip Indra Get Valkyrie Helm or Get Tushita"] and not indra and not HasItem("God's Chalice") then
         HopServer("Finding rip_indra for Valkyrie Helm / Tushita")
         return true
     end
@@ -2319,6 +2483,9 @@ end
 -- ====================================================================
 function SecretQuests.DoMirrorFractal()
     if not SecretQuests.AutoMirrorFractal or not CommF or Data.GetSea() ~= 3 or HasItem("Mirror Fractal") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 2100 then return false end
 
     -- Check if Dough King is alive
     local doughKing = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Dough King")
@@ -2349,8 +2516,8 @@ function SecretQuests.DoMirrorFractal()
         task.wait(0.5)
     end
 
-    -- Server Hop if configured
-    if GH["Select Hop"] and GH["Select Hop"]["Hop Find Dough King Get Mirror Fractal"] and not doughKing and not HasItem("Sweet Chalice") and not HasItem("God's Chalice") then
+    -- Only server hop for Dough King after reaching max-tier endgame level
+    if (lvl >= 2550 or GH["Hop Before Max"] == true) and GH["Select Hop"] and GH["Select Hop"]["Hop Find Dough King Get Mirror Fractal"] and not doughKing and not HasItem("Sweet Chalice") and not HasItem("God's Chalice") then
         HopServer("Finding Dough King for Mirror Fractal")
         return true
     end
@@ -2363,6 +2530,10 @@ end
 -- ====================================================================
 function SecretQuests.DoYama()
     if not SecretQuests.AutoYama or not CommF or Data.GetSea() ~= 3 or HasItem("Yama") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 1750 then return false end
+
     local eliteKills = CommF:InvokeServer("EliteHunter", "Progress") or 0
     if eliteKills < 30 then
         local enemies = Workspace:FindFirstChild("Enemies")
@@ -2383,7 +2554,8 @@ function SecretQuests.DoYama()
         end
         CommF:InvokeServer("EliteHunter")
         return false
-    else
+    elseif (tick() - SaberPuzzleState.LastYamaTry) > 20 then
+        SaberPuzzleState.LastYamaTry = tick()
         HUDStatus = "CDK: 30 Elites Killed! Pulling Yama at Waterfall Temple..."
         local sealedKatana = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Waterfall") and Workspace.Map.Waterfall:FindFirstChild("SealedKatana")
         if sealedKatana then
@@ -2397,10 +2569,14 @@ function SecretQuests.DoYama()
             return true
         end
     end
+    return false
 end
 
 function SecretQuests.DoTushita()
     if not SecretQuests.AutoTushita or not CommF or Data.GetSea() ~= 3 or HasItem("Tushita") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 2000 then return false end
 
     -- Check if Longma is alive
     local longma = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Longma")
@@ -2429,6 +2605,9 @@ end
 function SecretQuests.DoCDK()
     if not SecretQuests.AutoCDK or not CommF or Data.GetSea() ~= 3 or HasItem("Cursed Dual Katana") then return false end
     if not HasItem("Yama") or not HasItem("Tushita") then return false end
+    local d = LocalPlayer:FindFirstChild("Data")
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 2200 then return false end
 
     -- Check if Soul Reaper / Cake Queen are alive for CDK trials
     local soulReaper = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Soul Reaper")
@@ -2455,16 +2634,7 @@ function SecretQuests.DoCDK()
         end
     end
 
-    -- CDK Crypt Master at Floating Turtle
-    HUDStatus = "CDK Quest: Talking to Crypt Master & Progressing Trials..."
-    local cdkNPC = CFrame.new(-12061.27, 332.12, -7534.50)
-    toTarget(cdkNPC, 5)
-    pcall(function()
-        CommF:InvokeServer("CDKQuest", "StartTrial", "Good")
-        CommF:InvokeServer("CDKQuest", "StartTrial", "Evil")
-        CommF:InvokeServer("CDKQuest", "OpenDoor")
-    end)
-    return true
+    return false
 end
 
 -- ====================================================================
@@ -2497,33 +2667,19 @@ end
 function SecretQuests.DoSoulGuitar()
     if not SecretQuests.AutoSoulGuitar or not CommF or Data.GetSea() ~= 3 or HasItem("Soul Guitar") or HasItem("Skull Guitar") then return false end
     local d = LocalPlayer:FindFirstChild("Data")
-    if not d or not d:FindFirstChild("Level") or d.Level.Value < 2300 then return false end
+    local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+    if lvl < 2300 then return false end
 
-    -- Check if Darkbeard is alive for Dark Fragment
-    local darkbeard = Workspace:FindFirstChild("Enemies") and Workspace.Enemies:FindFirstChild("Darkbeard")
-    if darkbeard and IsMobAlive(darkbeard) then
-        local mRoot = darkbeard:FindFirstChild("HumanoidRootPart")
-        if mRoot then
-            HUDStatus = "Boss: Defeating Darkbeard [Dark Fragment for Soul Guitar] 🌌"
-            toTarget(GetFarmCFrame(mRoot), 5)
-            BringMob(darkbeard)
-            EquipWeapon()
-            return true
-        end
-    end
-
-    if IsNight() then
-        HUDStatus = "Soul Guitar: Praying at Haunted Castle Gravestone..."
+    local sky = Lighting:FindFirstChildOfClass("Sky")
+    local isFullMoon = IsNight() and sky and sky.MoonTextureId == "http://www.roblox.com/asset/?id=9709149431"
+    if isFullMoon and (tick() - SaberPuzzleState.LastSoulGuitarTry) > 60 then
+        SaberPuzzleState.LastSoulGuitarTry = tick()
+        HUDStatus = "Soul Guitar: Praying at Haunted Castle Gravestone [Full Moon]..."
         local graveCF = CFrame.new(-9515.00, 142.00, 5535.00)
         toTarget(graveCF, 5)
         pcall(function() CommF:InvokeServer("Gravstone", "Pray") end)
         task.wait(0.5)
         pcall(function() CommF:InvokeServer("SoulGuitar", "Craft") end)
-        return true
-    end
-
-    if GH["Select Hop"] and GH["Select Hop"]["Hop Find Darkbeard [SG]"] and not darkbeard and not HasItem("Dark Fragment") then
-        HopServer("Finding Darkbeard for Soul Guitar Dark Fragment")
         return true
     end
 
@@ -2534,39 +2690,8 @@ end
 -- 7. AUTO PULL LEVER & RACE V4 MIRAGE ISLAND (SEA 3)
 -- ====================================================================
 function SecretQuests.DoPullLever()
-    if not SecretQuests.AutoPullLever or not CommF or Data.GetSea() ~= 3 then return false end
-
-    -- Check if Temple of Time Lever is already pulled
-    local m = Workspace:FindFirstChild("Map")
-    local tot = m and m:FindFirstChild("Temple of Time")
-    local lever = tot and tot:FindFirstChild("Lever")
-    if lever then
-        return false -- Lever already unlocked & available
-    end
-
-    -- Check Mirage Island
-    local mirage = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("MysticIsland")
-    if mirage then
-        HUDStatus = "Race V4: Mirage Island Active! Resonating with Moon & Finding Gear 🌙"
-        local peak = CFrame.new(mirage:GetPivot().Position + Vector3.new(0, 180, 0))
-        toTarget(peak, 5)
-        -- Activate Race V3 ability
-        pcall(function()
-            local v = VirtualInputManager
-            if v then v:SendKeyEvent(true, Enum.KeyCode.T, false, game) task.wait(0.1) v:SendKeyEvent(false, Enum.KeyCode.T, false, game) end
-        end)
-        task.wait(1)
-        return true
-    end
-
-    -- Visit Temple of Time and pull lever if unlocked
-    local templeRoom = CFrame.new(28282.57, 14896.85, 105.10)
-    toTarget(templeRoom, 5)
-    local pPrompt = Workspace:FindFirstChild("ProximityPrompt", true)
-    if pPrompt and typeof(fireproximityprompt) == "function" then
-        fireproximityprompt(pPrompt, 1)
-    end
-    return true
+    -- Handled safely by Race.DoMirageGear / Race.CheckTempleUnlock / Race.DoPullLever
+    return false
 end
 
 -- ====================================================================
@@ -3500,37 +3625,55 @@ local FarmWatchdog = { Mob = nil, HP = nil, Since = 0 }
 local SpawnPatrolIdx = 1
 local SpawnPatrolAt = 0
 
-local function FindMobSpawnWaitCF(mobName, fallbackPosM)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local baseWaitCF = CFrame.new(fallbackPosM.Position + Vector3.new(0, 25, 0))
-    if hrp and (hrp.Position - fallbackPosM.Position).Magnitude > 300 then
-        return baseWaitCF
-    end
+local function NormalizeQuestText(str)
+    if not str then return "" end
+    local s = tostring(str):lower()
+    s = s:gsub("military ", "mil. ")
+    s = s:gsub("posessed", "possessed")
+    s = s:gsub("mummies", "mummy")
+    s = s:gsub("spies", "spy")
+    s = s:gsub("thieves", "thief")
+    s = s:gsub("snowmen", "snowman")
+    return s
+end
 
+local function FindMobSpawnWaitCF(mobName, fallbackPosM, questPos)
     local spawns = {}
-    local worldOrigin = Workspace:FindFirstChild("_WorldOrigin")
-    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
-    if enemySpawns and mobName then
-        for _, sp in ipairs(enemySpawns:GetChildren()) do
+    local nearSpawns = {}
+    local refCenter = (questPos and questPos.Position) or fallbackPosM.Position
+
+    local function collectFrom(container)
+        if not container or not mobName then return end
+        for _, sp in ipairs(container:GetChildren()) do
             if sp.Name == mobName or sp.Name:sub(1, #mobName + 2) == (mobName .. " [") then
                 local pos = sp:IsA("BasePart") and sp.Position or (sp:IsA("Model") and sp:GetPivot().Position)
                 if pos then
                     table.insert(spawns, pos)
+                    if (pos - refCenter).Magnitude <= 3500 then
+                        table.insert(nearSpawns, pos)
+                    end
                 end
             end
         end
     end
-    if #spawns > 0 then
+
+    local worldOrigin = Workspace:FindFirstChild("_WorldOrigin")
+    collectFrom(worldOrigin and worldOrigin:FindFirstChild("EnemySpawns"))
+    collectFrom(ReplicatedStorage:FindFirstChild("FortBuilderReplicatedSpawnPositionsFolder"))
+
+    local pool = (#nearSpawns > 0) and nearSpawns or spawns
+    if #pool > 0 then
         if (tick() - SpawnPatrolAt) > 2.5 then
             SpawnPatrolAt = tick()
-            SpawnPatrolIdx = (SpawnPatrolIdx % #spawns) + 1
+            SpawnPatrolIdx = (SpawnPatrolIdx % #pool) + 1
         end
-        local idx = ((SpawnPatrolIdx - 1) % #spawns) + 1
-        return CFrame.new(spawns[idx] + Vector3.new(0, 25, 0))
+        local idx = ((SpawnPatrolIdx - 1) % #pool) + 1
+        return CFrame.new(pool[idx] + Vector3.new(0, 25, 0))
     end
-    return baseWaitCF
+    return CFrame.new(fallbackPosM.Position + Vector3.new(0, 25, 0))
 end
+
+local Sea2BartiloPlatesDone = false
 
 task.spawn(function()
     while (runtime and runtime.alive) do
@@ -3543,44 +3686,166 @@ task.spawn(function()
 
             -- Sea 1 -> 2 Transition
             if currentSea == 1 and level >= 700 and comm then
-                local prog = comm:InvokeServer("DressrosaQuestProgress", "Dressrosa")
-                if prog ~= 0 then
-                    HUDStatus = "Unlocking Sea 2 (Detective & Ice Admiral)"
-                    local iceDoor = Workspace:FindFirstChild("Map") and Workspace.Map:FindFirstChild("Ice") and Workspace.Map.Ice:FindFirstChild("Door")
-                    if iceDoor and iceDoor.CanCollide then
-                        toTarget(CFrame.new(4852.28, 5.65, 718.53), 5)
-                        task.wait(0.5)
-                        comm:InvokeServer("DressrosaQuestProgress", "Detective")
-                    else
-                        local enemies = Workspace:FindFirstChild("Enemies")
-                        local iceAdmiral = enemies and enemies:FindFirstChild("Ice Admiral")
-                        if iceAdmiral and IsMobAlive(iceAdmiral) then
-                            local root = iceAdmiral:FindFirstChild("HumanoidRootPart")
-                            if root then
-                                toTarget(GetFarmCFrame(root), 5)
-                                BringMob(iceAdmiral)
-                                EquipWeapon()
-                                return
-                            end
-                        else
-                            toTarget(CFrame.new(1347.71, 37.37, -1325.64), 10)
-                            return
-                        end
-                    end
-                else
+                local progState = nil
+                pcall(function() progState = comm:InvokeServer("DressrosaQuestProgress") end)
+                local progNum = nil
+                pcall(function() progNum = comm:InvokeServer("DressrosaQuestProgress", "Dressrosa") end)
+                if (type(progState) == "table" and progState.KilledIceBoss) or progNum == 0 then
                     HUDStatus = "Traveling to Sea 2 (Dressrosa)"
                     comm:InvokeServer("TravelDressrosa")
                     return
                 end
+
+                HUDStatus = "Unlocking Sea 2 (Detective & Ice Admiral)"
+                if type(progState) ~= "table" or not progState.TalkedDetective then
+                    toTarget(CFrame.new(4852.28, 5.65, 718.53), 5)
+                    task.wait(0.35)
+                    comm:InvokeServer("DressrosaQuestProgress", "Detective")
+                    comm:InvokeServer("DressrosaQuestProgress", "Detective")
+                    task.wait(0.35)
+                    comm:InvokeServer("DressrosaQuestProgress", "UseKey")
+                    return
+                end
+
+                if not progState.UsedKey then
+                    toTarget(CFrame.new(1347.71, 37.37, -1325.64), 8)
+                    comm:InvokeServer("DressrosaQuestProgress", "UseKey")
+                    task.wait(0.35)
+                end
+
+                local enemies = Workspace:FindFirstChild("Enemies")
+                local iceAdmiral = enemies and enemies:FindFirstChild("Ice Admiral")
+                if iceAdmiral and IsMobAlive(iceAdmiral) then
+                    local root = iceAdmiral:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        toTarget(GetFarmCFrame(root), 5)
+                        BringMob(iceAdmiral)
+                        EquipWeapon()
+                        return
+                    end
+                else
+                    toTarget(CFrame.new(1347.71, 37.37, -1325.64), 10)
+                    comm:InvokeServer("DressrosaQuestProgress", "UseKey")
+                    return
+                end
             end
 
-            -- Sea 2 -> 3 Transition
+            -- Sea 2 -> 3 Transition (Bartilo -> Don Swan -> rip_indra -> TravelZou)
             if currentSea == 2 and level >= 1500 and comm then
-                local zCheck = comm:InvokeServer("ZQuestProgress", "Check")
+                local zCheck = nil
+                pcall(function() zCheck = comm:InvokeServer("ZQuestProgress", "Check") end)
                 if zCheck == 1 then
                     HUDStatus = "Traveling to Sea 3 (Zou)"
                     comm:InvokeServer("TravelZou")
                     return
+                end
+
+                local enemies = Workspace:FindFirstChild("Enemies")
+                local ripIndra = enemies and enemies:FindFirstChild("rip_indra")
+                if ripIndra and IsMobAlive(ripIndra) then
+                    local root = ripIndra:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        HUDStatus = "Unlocking Sea 3: Defeating rip_indra!"
+                        toTarget(GetFarmCFrame(root), 5)
+                        BringMob(ripIndra)
+                        EquipWeapon()
+                        return
+                    end
+                end
+
+                if zCheck == 0 then
+                    HUDStatus = "Unlocking Sea 3: Starting rip_indra Fight..."
+                    local mrCaptainCF = CFrame.new(-1926.32, 12.82, 1738.31)
+                    toTarget(mrCaptainCF, 8)
+                    local hrpNow = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrpNow and (hrpNow.Position - mrCaptainCF.Position).Magnitude <= 12 then
+                        comm:InvokeServer("ZQuestProgress", "Begin")
+                        task.wait(0.5)
+                    end
+                    return
+                end
+
+                -- Ensure Bartilo Quest completed (needed before Trevor / Don Swan)
+                local bart = nil
+                pcall(function() bart = comm:InvokeServer("BartiloQuestProgress") end)
+                if type(bart) == "table" then
+                    if not bart.KilledBandits then
+                        local hasQ, qT = GetActiveQuestState()
+                        if hasQ and qT and not NormalizeQuestText(qT):find("swan pirate", 1, true) then
+                            comm:InvokeServer("AbandonQuest")
+                            task.wait(0.3)
+                            return
+                        end
+                        if not hasQ then
+                            HUDStatus = "Sea 3 Prep: Accepting Bartilo Quest (50 Swan Pirates)"
+                            toTarget(CFrame.new(-456.28, 73.02, 299.89), 8)
+                            local hrpNow = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            if hrpNow and (hrpNow.Position - Vector3.new(-456.28, 73.02, 299.89)).Magnitude <= 15 then
+                                comm:InvokeServer("StartQuest", "BartiloQuest", 1)
+                                task.wait(0.35)
+                            end
+                            return
+                        end
+                        HUDStatus = "Sea 3 Prep: Bartilo (Swan Pirates)"
+                        EquipWeapon()
+                        local targetSP = nil
+                        if enemies then
+                            for _, mob in ipairs(enemies:GetChildren()) do
+                                if mob.Name == "Swan Pirate" and IsMobAlive(mob) then
+                                    targetSP = mob
+                                    break
+                                end
+                            end
+                        end
+                        if targetSP and targetSP:FindFirstChild("HumanoidRootPart") then
+                            toTarget(GetFarmCFrame(targetSP.HumanoidRootPart), 5)
+                            BringMob(targetSP)
+                        else
+                            toTarget(FindMobSpawnWaitCF("Swan Pirate", CFrame.new(1068.66, 137.61, 1322.11)), 10)
+                        end
+                        return
+                    elseif not bart.KilledSpring then
+                        local jeremy = enemies and enemies:FindFirstChild("Jeremy")
+                        if jeremy and IsMobAlive(jeremy) and jeremy:FindFirstChild("HumanoidRootPart") then
+                            HUDStatus = "Sea 3 Prep: Defeating Jeremy (Bartilo)"
+                            toTarget(GetFarmCFrame(jeremy.HumanoidRootPart), 5)
+                            BringMob(jeremy)
+                            EquipWeapon()
+                            return
+                        end
+                    elseif not bart.DidPlates and not Sea2BartiloPlatesDone then
+                        HUDStatus = "Sea 3 Prep: Solving Colosseum Plates (Bartilo)"
+                        local plates = {
+                            CFrame.new(-1836, 11, 1714),
+                            CFrame.new(-1850.49, 13.18, 1750.90),
+                            CFrame.new(-1858.87, 19.38, 1712.02),
+                            CFrame.new(-1803.94, 16.58, 1750.90),
+                            CFrame.new(-1858.56, 16.86, 1724.80),
+                            CFrame.new(-1869.54, 15.99, 1681.01),
+                            CFrame.new(-1800.10, 16.50, 1684.52),
+                            CFrame.new(-1819.26, 14.80, 1717.91),
+                            CFrame.new(-1813.52, 14.86, 1724.80)
+                        }
+                        for _, pCF in ipairs(plates) do
+                            toTarget(pCF, 3)
+                            task.wait(0.6)
+                        end
+                        Sea2BartiloPlatesDone = true
+                        return
+                    end
+                end
+
+                local trevorStatus = nil
+                pcall(function() trevorStatus = comm:InvokeServer("TalkTrevor", "1") end)
+                if trevorStatus == 0 then
+                    local donSwan = enemies and enemies:FindFirstChild("Don Swan")
+                    if donSwan and IsMobAlive(donSwan) and donSwan:FindFirstChild("HumanoidRootPart") then
+                        HUDStatus = "Sea 3 Prep: Defeating Don Swan!"
+                        toTarget(GetFarmCFrame(donSwan.HumanoidRootPart), 5)
+                        BringMob(donSwan)
+                        EquipWeapon()
+                        return
+                    end
                 end
             end
 
@@ -3606,10 +3871,10 @@ task.spawn(function()
 
             local hasQuest, questTitle = GetActiveQuestState()
 
-            -- Abandon outdated quests (e.g., Monkey/Gorilla quest active after leveling to 30+ Pirate)
+            -- Abandon outdated quests (normalized to avoid pluralization mismatches like Mil. Spies, Snowmen, Thieves)
             if hasQuest and questTitle and questTitle ~= "" and comm then
-                local normTitle = questTitle:gsub("Military ", "Mil. "):lower()
-                local normMob = quest.Mob:gsub("Military ", "Mil. "):lower()
+                local normTitle = NormalizeQuestText(questTitle)
+                local normMob = NormalizeQuestText(quest.Mob)
                 if not normTitle:find(normMob, 1, true) then
                     HUDStatus = string.format("Switching Quest -> %s (Lv %d)", quest.Mob, level)
                     comm:InvokeServer("AbandonQuest")
@@ -3618,16 +3883,18 @@ task.spawn(function()
                 end
             end
 
+            local livePosQ = GetLiveQuestNPCCF(quest.Quest, quest.Min) or quest.PosQ
+
             if not hasQuest then
                 HUDStatus = string.format("Accepting Quest: %s (%s)", quest.Quest, quest.Mob)
-                local targetQ = quest.PosQ
+                local targetQ = livePosQ
                 pcall(function()
                     local npcs = Workspace:FindFirstChild("NPCs")
                     if npcs then
                         for _, npc in ipairs(npcs:GetChildren()) do
                             if npc:IsA("Model") and (npc.Name:find("Quest") or npc.Name:find(quest.Quest)) then
                                 local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
-                                if root and (root.Position - quest.PosQ.Position).Magnitude <= 120 then
+                                if root and (root.Position - livePosQ.Position).Magnitude <= 120 then
                                     targetQ = root.CFrame
                                     break
                                 end
@@ -3684,7 +3951,7 @@ task.spawn(function()
                     local mobHRP = targetMob:FindFirstChild("HumanoidRootPart")
                     local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
                     if mobHRP and mobHum then
-                        -- Release & move on if a brought/glitched mob takes zero damage for 2.5s
+                        -- Release & move on if a brought/glitched mob takes zero damage for 4.0s
                         if hrp and (hrp.Position - mobHRP.Position).Magnitude <= 40 then
                             if FarmWatchdog.Mob ~= targetMob then
                                 FarmWatchdog.Mob = targetMob
@@ -3693,7 +3960,7 @@ task.spawn(function()
                             elseif mobHum.Health < (FarmWatchdog.HP or mobHum.Health) then
                                 FarmWatchdog.HP = mobHum.Health
                                 FarmWatchdog.Since = now
-                            elseif (now - FarmWatchdog.Since) >= 2.5 then
+                            elseif (now - FarmWatchdog.Since) >= 4.0 then
                                 ReleaseMob(targetMob)
                                 targetMob:SetAttribute("IgnoreBringUntil", now + 12)
                                 targetMob:SetAttribute("IgnoreTargetUntil", now + 4)
@@ -3702,7 +3969,6 @@ task.spawn(function()
                             end
                         end
 
-                        local isPrisoner = (targetMob.Name == "Prisoner" or targetMob.Name == "Dangerous Prisoner" or targetMob.Name:find("Prisoner"))
                         local isEscapedPrisoner = targetMob.Name:find("Escap") or targetMob.Name:find("Puncher") or (targetMob:FindFirstChildWhichIsA("ProximityPrompt", true) ~= nil)
                         if isEscapedPrisoner and not targetMob:GetAttribute("Confronted") then
                             pcall(function()
@@ -3727,13 +3993,13 @@ task.spawn(function()
                                 targetMob:SetAttribute("Confronted", true)
                             end)
                         end
-                        local farmCF = isPrisoner and (mobHRP.CFrame * CFrame.new(0, 3, -4)) or GetFarmCFrame(mobHRP)
+                        local farmCF = isEscapedPrisoner and (mobHRP.CFrame * CFrame.new(0, 3, -4)) or GetFarmCFrame(mobHRP)
                         toTarget(farmCF, 5)
                         BringMob(targetMob)
                     end
                 else
                     FarmWatchdog.Mob = nil
-                    toTarget(FindMobSpawnWaitCF(quest.Mob, quest.PosM), 10)
+                    toTarget(FindMobSpawnWaitCF(quest.Mob, quest.PosM, livePosQ), 10)
                 end
             end
         end)
