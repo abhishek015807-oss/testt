@@ -751,7 +751,8 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
 
     if TweenManager.TweenRunning and TweenManager.currentGoal and TweenManager.currentPart == hrp then
         local goalDiff = (TweenManager.currentGoal.Position - goalCF.Position).Magnitude
-        if goalDiff <= 12 then
+        local yDiff = math.abs(TweenManager.currentGoal.Position.Y - goalCF.Position.Y)
+        if goalDiff <= 8 and yDiff <= 3 then
             return TweenManager.currentTween
         end
     end
@@ -1375,7 +1376,7 @@ Data.Places = {
     Sea3 = { 7449423635, 100117331123089 }
 }
 Data.Quests = {
-	{ Min = 1, Max = 9, Quest = "BanditQuest1", Id = 1, Mob = "Bandit", PosQ = CFrame.new(1045.9626464844, 27.002508163452, 1560.8203125), PosM = CFrame.new(1045.9626464844, 27.002508163452, 1560.8203125) },
+	{ Min = 1, Max = 9, Quest = "BanditQuest1", Id = 1, Mob = "Bandit", PosQ = CFrame.new(1059.37, 15.44, 1550.42), PosM = CFrame.new(1145.0, 20.0, 1625.0) },
 	{ Min = 10, Max = 14, Quest = "JungleQuest", Id = 1, Mob = "Monkey", PosQ = CFrame.new(-1598.08911, 35.5501175, 153.377838), PosM = CFrame.new(-1448.5180664062, 67.853012084961, 11.465796470642) },
 	{ Min = 15, Max = 29, Quest = "JungleQuest", Id = 2, Mob = "Gorilla", PosQ = CFrame.new(-1598.08911, 35.5501175, 153.377838), PosM = CFrame.new(-1129.8836669922, 40.46354675293, -525.42370605469) },
 	{ Min = 30, Max = 39, Quest = "BuggyQuest1", Id = 1, Mob = "Pirate", PosQ = CFrame.new(-1141.07483, 4.10001802, 3831.5498), PosM = CFrame.new(-1103.5134277344, 13.752052307129, 3896.0910644531) },
@@ -1528,26 +1529,32 @@ local function HasActiveQuest()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     if not pgui then return false end
 
-    -- 1. Check TrackedQuestFrame
+    -- 1. Check TrackedQuestFrame (supports both ScreenGui.Enabled and Frame.Visible)
     local tqf = pgui:FindFirstChild("TrackedQuestFrame")
-    if tqf and tqf.Enabled and tqf:FindFirstChild("Frame") and tqf.Frame.Visible then
-        return true
+    if tqf then
+        local tqfActive = (tqf:IsA("LayerCollector") and tqf.Enabled) or (tqf:IsA("GuiObject") and tqf.Visible)
+        local inner = tqf:FindFirstChild("Frame")
+        if tqfActive and (not inner or inner.Visible) then
+            return true
+        end
     end
 
-    -- 2. Check Main and Main (minimal) Quest UI
-    local main = pgui:FindFirstChild("Main") or pgui:FindFirstChild("Main (minimal)")
-    if main then
-        local qFrame = main:FindFirstChild("Quest")
-        if qFrame and qFrame.Visible then
-            local container = qFrame:FindFirstChild("Container")
-            if container then
-                local questTitle = container:FindFirstChild("QuestTitle")
-                local title = questTitle and questTitle:FindFirstChild("Title")
-                if title and title.Text and title.Text ~= "" and title.Text ~= "QUEST" then
+    -- 2. Check BOTH Main and Main (minimal) Quest UIs (never stop on Main if inactive)
+    for _, guiName in ipairs({ "Main", "Main (minimal)" }) do
+        local gui = pgui:FindFirstChild(guiName)
+        if gui then
+            local qFrame = gui:FindFirstChild("Quest")
+            if qFrame and qFrame.Visible then
+                local container = qFrame:FindFirstChild("Container")
+                if container then
+                    local questTitle = container:FindFirstChild("QuestTitle")
+                    local title = questTitle and questTitle:FindFirstChild("Title")
+                    if title and title.Text and title.Text ~= "" and title.Text ~= "QUEST" then
+                        return true
+                    end
+                else
                     return true
                 end
-            else
-                return true
             end
         end
     end
@@ -2813,8 +2820,9 @@ function SecretQuests.DoEvilSlimes()
     return true
 end
 
--- 7. Master Bonus Moments Stepper
+-- 7. Master Bonus Moments Stepper (opt-in only; avoids hijacking Sea 1 level farming)
 function SecretQuests.DoBonusMoments()
+    if not (GH and GH["Auto Bonus Moments"] == true) then return false end
     if Data.GetSea and Data.GetSea() ~= 1 then return false end
 
     if SecretQuests.DoEscapeFromAlcatraz() then return true end
@@ -3487,9 +3495,9 @@ task.spawn(function()
                 end)
                 toTarget(targetQ, 8)
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 35 and comm then
+                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 20 and comm then
                     comm:InvokeServer("StartQuest", quest.Quest, quest.Id)
-                    task.wait(0.3)
+                    task.wait(0.35)
                 end
             else
                 HUDStatus = string.format("Farming %s (Lv %d)", quest.Mob, quest.Min or 1)
@@ -3554,7 +3562,7 @@ task.spawn(function()
                         toTarget(farmCF, 5)
                     end
                 else
-                    toTarget(quest.PosM, 15)
+                    toTarget(CFrame.new(quest.PosM.Position + Vector3.new(0, 25, 0)), 10)
                 end
             end
         end)
