@@ -517,7 +517,10 @@ local function EnsureCombatRemotes()
 end
 
 local function RefreshCombatSeedAsync()
-    if CombatNet.SeedFetching or (CombatNet.SeedValue and (tick() - CombatNet.SeedFetchedAt) < 2) then
+    if CombatNet.SeedFetching and (tick() - (CombatNet.SeedFetchStartedAt or 0)) < 5 then
+        return CombatNet.SeedValue
+    end
+    if CombatNet.SeedValue and (tick() - CombatNet.SeedFetchedAt) < 2 then
         return CombatNet.SeedValue
     end
     local modules = ReplicatedStorage:FindFirstChild("Modules")
@@ -526,6 +529,7 @@ local function RefreshCombatSeedAsync()
     if not seedRF then return nil end
 
     CombatNet.SeedFetching = true
+    CombatNet.SeedFetchStartedAt = tick()
     task.spawn(function()
         local ok, res = pcall(function() return seedRF:InvokeServer() end)
         if ok and res ~= nil then
@@ -749,7 +753,7 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or hrp.Parent ~= char or not hum or hum.Health <= 0 then return end
 
-    if TweenManager.TweenRunning and TweenManager.currentGoal and TweenManager.currentPart == hrp then
+    if TweenManager.TweenRunning and activeCoroutine and coroutine.status(activeCoroutine) == "suspended" and TweenManager.currentGoal and TweenManager.currentPart == hrp then
         local goalDiff = (TweenManager.currentGoal.Position - goalCF.Position).Magnitude
         local yDiff = math.abs(TweenManager.currentGoal.Position.Y - goalCF.Position.Y)
         if goalDiff <= 8 and yDiff <= 3 then
@@ -1219,7 +1223,7 @@ local function BringMob(primaryMob)
         local ignUntil = mob:GetAttribute("IgnoreBringUntil") or 0
         if mob ~= primaryMob and mob.Name == primaryMob.Name and IsMobAlive(mob) and not mob:GetAttribute("IgnoreGrab") and now >= ignUntil then
             local mRoot = mob:FindFirstChild("HumanoidRootPart")
-            if mRoot and (mRoot.Position - primHRP.Position).Magnitude <= 160 and count < 4 then
+            if mRoot and (mRoot.Position - primHRP.Position).Magnitude <= 160 and math.abs(mRoot.Position.Y - primHRP.Position.Y) <= 35 and count < 4 then
                 FreezeMobPart(mob, BringSpawnCF * CFrame.new(0, math.random(0, 1), math.random(0, 1)))
                 count = count + 1
             end
@@ -1536,24 +1540,32 @@ function Data.GetQuest(lvl)
     return best
 end
 
+local InvCache = { Data = nil, At = 0 }
 local function HasItem(itemName)
     local bp = LocalPlayer:FindFirstChild("Backpack")
     local char = LocalPlayer.Character
     if (bp and bp:FindFirstChild(itemName)) or (char and char:FindFirstChild(itemName)) then
         return true
     end
-    local hasInv = false
-    pcall(function()
-        if CommF then
-            local inv = CommF:InvokeServer("getInventory")
-            if type(inv) == "table" then
-                for _, item in ipairs(inv) do
-                    if item.Name == itemName then hasInv = true; break end
+    local now = tick()
+    if (now - InvCache.At) >= 5 then
+        InvCache.At = now
+        pcall(function()
+            local comm = GetCommF()
+            if comm then
+                local inv = comm:InvokeServer("getInventory")
+                if type(inv) == "table" then
+                    InvCache.Data = inv
                 end
             end
+        end)
+    end
+    if type(InvCache.Data) == "table" then
+        for _, item in ipairs(InvCache.Data) do
+            if item.Name == itemName then return true end
         end
-    end)
-    return hasInv
+    end
+    return false
 end
 
 local function PressKey(key)
@@ -1584,7 +1596,11 @@ local function GetActiveQuestState()
         local tqfActive = (tqf:IsA("LayerCollector") and tqf.Enabled) or (tqf:IsA("GuiObject") and tqf.Visible)
         local inner = tqf:FindFirstChild("Frame")
         if tqfActive and (not inner or inner.Visible) then
-            return true, CollectVisibleGuiText(inner or tqf)
+            local txt = CollectVisibleGuiText(inner or tqf)
+            local cleanTxt = txt:gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+            if cleanTxt ~= "" and cleanTxt:upper() ~= "QUEST" then
+                return true, cleanTxt
+            end
         end
     end
 
@@ -2115,28 +2131,35 @@ end
 -- ====================================================================
 -- AUTO BUY HAKI (BUSO, GEPPO, SORU, KEN)
 -- ====================================================================
+local LastAutoHakiAt = 0
 local function AutoBuyHaki()
-    if not CommF or not GH["Buy Haki"] then return end
-    pcall(function()
-        local d = LocalPlayer:FindFirstChild("Data")
-        local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
-        local sea = Data.GetSea()
+    if (tick() - LastAutoHakiAt) < 20 then return end
+    LastAutoHakiAt = tick()
+    if not GH["Buy Haki"] then return end
+    task.spawn(function()
+        pcall(function()
+            local comm = GetCommF()
+            if not comm then return end
+            local d = LocalPlayer:FindFirstChild("Data")
+            local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
+            local sea = Data.GetSea()
 
-        if GH["Buy Haki"]["Enhancement"] and not HasItem("Buso") and beli >= 25000 then
-            CommF:InvokeServer("BuyHaki", "Buso")
-        end
-        if GH["Buy Haki"]["Skyjump"] and not HasItem("Geppo") and beli >= 10000 then
-            CommF:InvokeServer("BuyHaki", "Geppo")
-        end
-        if GH["Buy Haki"]["Flash Step"] and not HasItem("Soru") and beli >= 100000 then
-            CommF:InvokeServer("BuyHaki", "Soru")
-        end
-        if GH["Buy Haki"]["Observation"] and not HasItem("Observation") and beli >= 750000 and sea == 1 then
-            local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
-            if lvl >= 300 then
-                CommF:InvokeServer("KenTalk", "Buy")
+            if GH["Buy Haki"]["Enhancement"] and not HasItem("Buso") and beli >= 25000 then
+                comm:InvokeServer("BuyHaki", "Buso")
             end
-        end
+            if GH["Buy Haki"]["Skyjump"] and not HasItem("Geppo") and beli >= 10000 then
+                comm:InvokeServer("BuyHaki", "Geppo")
+            end
+            if GH["Buy Haki"]["Flash Step"] and not HasItem("Soru") and beli >= 100000 then
+                comm:InvokeServer("BuyHaki", "Soru")
+            end
+            if GH["Buy Haki"]["Observation"] and not HasItem("Observation") and beli >= 750000 and sea == 1 then
+                local lvl = d and d:FindFirstChild("Level") and d.Level.Value or 1
+                if lvl >= 300 then
+                    comm:InvokeServer("KenTalk", "Buy")
+                end
+            end
+        end)
     end)
 end
 
