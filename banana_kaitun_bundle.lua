@@ -804,7 +804,8 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
         if targetCFrame.Rotation == CFrame.identity and startCF.Rotation ~= CFrame.identity then
             targetCFrame = CFrame.new(targetCFrame.Position) * startCF.Rotation
         end
-        local totalDistance = (targetCFrame.Position - startCF.Position).Magnitude
+        local targetPos = targetCFrame.Position
+        local totalDistance = (targetPos - startCF.Position).Magnitude
 
         if totalDistance <= snapThreshold then
             hrp.CFrame = targetCFrame
@@ -815,7 +816,6 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
             return
         end
 
-        local distanceTraveled = 0
         local lastTick = tick()
 
         while not isCancelled do
@@ -839,38 +839,25 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
             end
 
             local dt = RunService.Heartbeat:Wait()
-            local currentTick = tick()
-            local elapsed = currentTick - lastTick
-            lastTick = currentTick
+            local nowTick = tick()
+            local elapsed = math.min(math.max(nowTick - lastTick, dt or 0.016), 0.07)
+            lastTick = nowTick
 
-            distanceTraveled = distanceTraveled + (targetSpeed * elapsed)
-            local alpha = math.clamp(distanceTraveled / totalDistance, 0, 1)
-
-            local currentPos = startCF.Position:Lerp(targetCFrame.Position, alpha)
-            local moveVec = targetCFrame.Position - currentPos
-
-            if targetCFrame.Rotation ~= CFrame.identity and targetCFrame.Rotation ~= startCF.Rotation then
-                hrp.CFrame = startCF:Lerp(targetCFrame, alpha)
-            else
-                if moveVec.Magnitude > 0.5 then
-                    local flatLook = Vector3.new(moveVec.X, 0, moveVec.Z)
-                    if flatLook.Magnitude > 0.1 then
-                        hrp.CFrame = CFrame.lookAt(currentPos, currentPos + flatLook)
-                    else
-                        hrp.CFrame = CFrame.new(currentPos) * startCF.Rotation
-                    end
-                else
-                    hrp.CFrame = CFrame.new(currentPos) * startCF.Rotation
-                end
+            if not hrp or not hrp.Parent or isCancelled then
+                break
             end
 
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
+            local currentPos = hrp.Position
+            local directDelta = targetPos - currentPos
+            local remaining = directDelta.Magnitude
 
-            ApplyTeleportTag()
+            local stepSpeed = targetSpeed
+            if remaining < 18 then
+                stepSpeed = math.min(targetSpeed, 100)
+            end
+            local stepDist = stepSpeed * elapsed
 
-            local remaining = (targetCFrame.Position - hrp.Position).Magnitude
-            if alpha >= 1 or remaining <= snapThreshold then
+            if remaining <= math.max(stepDist, snapThreshold) then
                 hrp.CFrame = targetCFrame
                 hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
@@ -886,6 +873,34 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
                 tweenObj.PlaybackState = Enum.PlaybackState.Completed
                 break
             end
+
+            -- Maintain safe sky cruise altitude during long cross-island flights (>450 horizontal studs)
+            local horizDist = Vector3.new(directDelta.X, 0, directDelta.Z).Magnitude
+            local steerTarget = targetPos
+            if horizDist > 450 and targetPos.Y < 200 then
+                local cruiseY = math.max(targetPos.Y + 60, 140)
+                if currentPos.Y < (cruiseY - 10) then
+                    steerTarget = Vector3.new(targetPos.X, cruiseY, targetPos.Z)
+                else
+                    steerTarget = Vector3.new(targetPos.X, math.max(currentPos.Y, cruiseY), targetPos.Z)
+                end
+            end
+
+            local moveDelta = steerTarget - currentPos
+            local moveDir = (moveDelta.Magnitude > 0.001) and moveDelta.Unit or directDelta.Unit
+            local nextPos = currentPos + (moveDir * stepDist)
+
+            local flatLook = Vector3.new(moveDir.X, 0, moveDir.Z)
+            if flatLook.Magnitude > 0.05 then
+                hrp.CFrame = CFrame.lookAt(nextPos, nextPos + flatLook)
+            else
+                hrp.CFrame = CFrame.new(nextPos) * ((targetCFrame.Rotation ~= CFrame.identity and targetCFrame.Rotation) or startCF.Rotation)
+            end
+
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+
+            ApplyTeleportTag()
         end
 
         cleanup()
