@@ -430,6 +430,7 @@ local RegisterHitRemote = nil
 local CombatNet = {
     EncRemote = nil,
     EncId = nil,
+    LastEncScanAt = 0,
     SeedValue = nil,
     SeedFetchedAt = 0,
     SeedFetching = false,
@@ -443,6 +444,9 @@ local CombatNet = {
     LastTarget = nil,
     LastTargetHP = nil,
     LastDamageAt = 0,
+    ActiveMode = nil,
+    WorkingMode = nil,
+    FailCycle = 0,
 }
 
 local function EnsureSimulationRadius()
@@ -512,6 +516,17 @@ local function EnsureCombatRemotes()
                     end
                 end
             end
+            if (tick() - (CombatNet.LastEncScanAt or 0)) >= 5 then
+                CombatNet.LastEncScanAt = tick()
+                for _, child in ipairs(ReplicatedStorage:GetDescendants()) do
+                    local attrId = child:IsA("RemoteEvent") and child:GetAttribute("Id")
+                    if attrId then
+                        CombatNet.EncRemote = child
+                        CombatNet.EncId = attrId
+                        return
+                    end
+                end
+            end
         end
     end)
 end
@@ -525,7 +540,7 @@ local function RefreshCombatSeedAsync()
     end
     local modules = ReplicatedStorage:FindFirstChild("Modules")
     local net = modules and modules:FindFirstChild("Net")
-    local seedRF = net and net:FindFirstChild("seed")
+    local seedRF = (net and (net:FindFirstChild("seed") or net:FindFirstChild("RF/seed"))) or ReplicatedStorage:FindFirstChild("seed", true)
     if not seedRF then return nil end
 
     CombatNet.SeedFetching = true
@@ -1360,7 +1375,7 @@ local function Attack()
         local primaryMob = hitTargets[1][1]
         local primaryPart = hitTargets[1][2]
 
-        -- Damage watchdog: cycle broken combat channel & trigger M1 click if target HP stalls
+        -- Damage watchdog: lock onto working combat mode or auto-rotate every 1.3s on stall
         local targetHum = primaryMob and primaryMob:FindFirstChildOfClass("Humanoid")
         local curHP = targetHum and targetHum.Health
         local needsFallbackClick = false
@@ -1372,14 +1387,18 @@ local function Attack()
             elseif curHP < (CombatNet.LastTargetHP or curHP) then
                 CombatNet.LastTargetHP = curHP
                 CombatNet.LastDamageAt = tick()
-            elseif (tick() - CombatNet.LastDamageAt) > 1.8 then
+                if CombatNet.ActiveMode then
+                    CombatNet.WorkingMode = CombatNet.ActiveMode
+                end
+            elseif (tick() - CombatNet.LastDamageAt) > 1.3 then
                 CombatNet.LastDamageAt = tick()
-                if CombatNet.LastChannel == "EncRemote" then
-                    CombatNet.SkipEncUntil = tick() + 4
+                CombatNet.WorkingMode = nil
+                CombatNet.FailCycle = ((CombatNet.FailCycle or 0) + 1) % 5
+                if CombatNet.ActiveMode == "EncRemote" then
                     CombatNet.SeedValue = nil
-                elseif CombatNet.LastChannel == "SendHits" then
+                elseif CombatNet.ActiveMode == "SendHits" then
                     CombatNet.SendHitsFn = nil
-                    CombatNet.SkipSendHitsUntil = tick() + 60
+                    CombatNet.SkipSendHitsUntil = tick() + 30
                 end
                 needsFallbackClick = true
             end
@@ -1390,6 +1409,7 @@ local function Attack()
             local delta = Vector3.new(primaryPart.Position.X - hrp.Position.X, 0, primaryPart.Position.Z - hrp.Position.Z)
             local dir = delta.Magnitude > 0.001 and delta.Unit or hrp.CFrame.LookVector
             tool.LeftClickRemote:FireServer(dir, 1)
+            CombatNet.ActiveMode = "FruitM1"
             return
         end
 
@@ -1398,52 +1418,116 @@ local function Attack()
             RegisterAttackRemote:FireServer(0)
         end
 
+        if not CombatNet.HitToken then
+            local coSuffix = tostring(coroutine.running()):sub(11, 15)
+            if coSuffix == "" then coSuffix = tostring(math.random(10000, 99999)) end
+            CombatNet.HitToken = tostring(LocalPlayer.UserId):sub(2, 4) .. coSuffix
+        end
+
         local sentAny = false
+        local seedVal = RefreshCombatSeedAsync()
 
-        -- Fire ONE primary hit channel per swing to stay under server rate limits
-        -- 1) Prefer Encrypted Seeded Remote (2025/2026 Blox Fruits update; works without setthreadidentity)
-        if tick() >= (CombatNet.SkipEncUntil or 0) then
-            local seedVal = RefreshCombatSeedAsync()
-            if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil then
-                local encOk = pcall(function()
-                    local xorKey = math.floor(Workspace:GetServerTimeNow() / 10 % 10) + 1
-                    local encName = string.gsub("RE/RegisterHit", ".", function(ch)
-                        return string.char(bit32.bxor(string.byte(ch), xorKey))
+        local function tryMode(modeIdx)
+            if modeIdx == 0 then
+                -- Encrypted Seeded Remote (2025/2026 Blox Fruits)
+                if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil and bit32 then
+                    local encTargets = {}
+                    for _, pair in ipairs(hitTargets) do
+                        local m = pair[1]
+                        local added = false
+                        for _, bp in ipairs(m:GetChildren()) do
+                            if bp:IsA("BasePart") then
+                                table.insert(encTargets, { m, bp })
+                                added = true
+                            end
+                        end
+                        if not added then
+                            table.insert(encTargets, pair)
+                        end
+                    end
+                    local headPart = primaryMob:FindFirstChild("Head") or primaryPart
+                    local encOk = pcall(function()
+                        local xorKey = math.floor(Workspace:GetServerTimeNow() / 10 % 10) + 1
+                        local encName = string.gsub("RE/RegisterHit", ".", function(ch)
+                            return string.char(bit32.bxor(string.byte(ch), xorKey))
+                        end)
+                        local remoteObj = (typeof(cloneref) == "function" and cloneref(CombatNet.EncRemote)) or CombatNet.EncRemote
+                        remoteObj:FireServer(encName, bit32.bxor(CombatNet.EncId + 909090, seedVal * 2), headPart, encTargets)
                     end)
-                    local remoteObj = (typeof(cloneref) == "function" and cloneref(CombatNet.EncRemote)) or CombatNet.EncRemote
-                    remoteObj:FireServer(encName, bit32.bxor(CombatNet.EncId + 909090, seedVal * 2), primaryPart, hitTargets)
-                end)
-                if encOk then
-                    sentAny = true
-                    CombatNet.LastChannel = "EncRemote"
+                    if encOk then
+                        CombatNet.ActiveMode = "EncRemote"
+                        return true
+                    end
+                end
+            elseif modeIdx == 1 then
+                -- Native SendHitsToServer
+                if tick() >= (CombatNet.SkipSendHitsUntil or 0) then
+                    local sendFn = ResolveSendHitsToServer()
+                    if sendFn then
+                        if CallAsGameThread(sendFn, primaryPart, hitTargets) then
+                            CombatNet.ActiveMode = "SendHits"
+                            return true
+                        else
+                            CombatNet.SendHitsFn = nil
+                            CombatNet.SkipSendHitsUntil = tick() + 30
+                        end
+                    end
+                end
+            elseif modeIdx == 2 then
+                -- Classic 2-arg RE/RegisterHit
+                if RegisterHitRemote then
+                    local ok = pcall(function()
+                        RegisterHitRemote:FireServer(primaryPart, hitTargets)
+                    end)
+                    if ok then
+                        CombatNet.ActiveMode = "RegHit2"
+                        return true
+                    end
+                end
+            elseif modeIdx == 3 then
+                -- Booted 1-arg token + 5-arg RE/RegisterHit
+                if RegisterHitRemote then
+                    if not CombatNet.TokenBooted then
+                        CombatNet.TokenBooted = true
+                        pcall(function() RegisterHitRemote:FireServer(CombatNet.HitToken) end)
+                    end
+                    local ok = pcall(function()
+                        RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, nil, CombatNet.HitToken)
+                    end)
+                    if ok then
+                        CombatNet.ActiveMode = "RegHit5"
+                        return true
+                    end
+                end
+            elseif modeIdx == 4 then
+                -- 4-arg token RE/RegisterHit
+                if RegisterHitRemote then
+                    local ok = pcall(function()
+                        RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, "078da341")
+                    end)
+                    if ok then
+                        CombatNet.ActiveMode = "RegHit4"
+                        return true
+                    end
                 end
             end
+            return false
         end
 
-        -- 2) Else try Native SendHitsToServer when captured and healthy
-        if (not sentAny) and tick() >= (CombatNet.SkipSendHitsUntil or 0) then
-            local sendFn = ResolveSendHitsToServer()
-            if sendFn then
-                if CallAsGameThread(sendFn, primaryPart, hitTargets) then
-                    sentAny = true
-                    CombatNet.LastChannel = "SendHits"
-                else
-                    CombatNet.SendHitsFn = nil
-                    CombatNet.SkipSendHitsUntil = tick() + 60
-                end
+        local modeOrder = {
+            EncRemote = 0,
+            SendHits = 1,
+            RegHit2 = 2,
+            RegHit5 = 3,
+            RegHit4 = 4,
+        }
+        local startIdx = (CombatNet.WorkingMode and modeOrder[CombatNet.WorkingMode]) or (CombatNet.FailCycle or 0)
+        for offset = 0, 4 do
+            local idx = (startIdx + offset) % 5
+            if tryMode(idx) then
+                sentAny = true
+                break
             end
-        end
-
-        -- 3) Else fall back to 4-arg Tokenized RE/RegisterHit preserving all targets
-        if (not sentAny) and RegisterHitRemote then
-            if not CombatNet.HitToken then
-                local coSuffix = tostring(coroutine.running()):sub(11, 15)
-                if coSuffix == "" then coSuffix = tostring(math.random(10000, 99999)) end
-                CombatNet.HitToken = tostring(LocalPlayer.UserId):sub(2, 4) .. coSuffix
-            end
-            RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, CombatNet.HitToken)
-            sentAny = true
-            CombatNet.LastChannel = "RegisterHit"
         end
 
         if (not sentAny) or needsFallbackClick then
@@ -3909,7 +3993,6 @@ task.spawn(function()
                     task.wait(0.35)
                 end
             else
-                HUDStatus = string.format("Farming %s (Lv %d)", quest.Mob, quest.Min or 1)
                 EquipWeapon()
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
@@ -3920,11 +4003,14 @@ task.spawn(function()
                     local bestExactDist, bestPrefDist = math.huge, math.huge
                     local exactMob, prefMob, fallbackMob = nil, nil, nil
                     local bestFallbackDist = math.huge
+                    local lowMobName = quest.Mob:lower()
                     for _, mob in ipairs(enemies:GetChildren()) do
                         if IsMobAlive(mob) then
                             local mRoot = mob:FindFirstChild("HumanoidRootPart")
                             local dist = mRoot and (mRoot.Position - refPos).Magnitude or math.huge
-                            local isMatch = (mob.Name == quest.Mob) or (mob.Name:sub(1, #quest.Mob + 2) == (quest.Mob .. " [") and not mob.Name:find("Escap"))
+                            local isMatch = (mob.Name == quest.Mob)
+                                or (mob.Name:sub(1, #quest.Mob + 2) == (quest.Mob .. " [") and not mob.Name:find("Escap"))
+                                or (mob.Name:lower():find(lowMobName, 1, true) and not mob.Name:find("Escap"))
                             if isMatch then
                                 local ignoreUntil = mob:GetAttribute("IgnoreTargetUntil") or 0
                                 if now < ignoreUntil then
@@ -3948,6 +4034,7 @@ task.spawn(function()
                 end
 
                 if targetMob then
+                    HUDStatus = string.format("Farming %s [%s] (Lv %d)", quest.Mob, tostring(CombatNet.ActiveMode or "Scan"), level)
                     local mobHRP = targetMob:FindFirstChild("HumanoidRootPart")
                     local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
                     if mobHRP and mobHum then
@@ -3998,6 +4085,7 @@ task.spawn(function()
                         BringMob(targetMob)
                     end
                 else
+                    HUDStatus = string.format("Waiting Spawn: %s (Lv %d)", quest.Mob, level)
                     FarmWatchdog.Mob = nil
                     toTarget(FindMobSpawnWaitCF(quest.Mob, quest.PosM, livePosQ), 10)
                 end
