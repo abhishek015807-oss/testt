@@ -1135,11 +1135,41 @@ end
 local LastBringMob = nil
 local BringSpawnCF = nil
 
+local function SaveMobOrigin(mob, mRoot)
+    if mob and mRoot and mob:GetAttribute("OldX") == nil then
+        local p = mRoot.Position
+        mob:SetAttribute("OldX", p.X)
+        mob:SetAttribute("OldY", p.Y)
+        mob:SetAttribute("OldZ", p.Z)
+    end
+end
+
+local function ReleaseMob(mob)
+    if not mob or not mob.Parent then return end
+    pcall(function()
+        local hum = mob:FindFirstChildOfClass("Humanoid")
+        local mRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+        if hum and hum.Health > 0 and hum.WalkSpeed == 0 then
+            hum.WalkSpeed = 16
+        end
+        if mRoot then
+            local bv = mRoot:FindFirstChild("FarmingVelocity")
+            if bv then bv:Destroy() end
+            local ox, oy, oz = mob:GetAttribute("OldX"), mob:GetAttribute("OldY"), mob:GetAttribute("OldZ")
+            if ox and oy and oz then
+                mRoot.CFrame = CFrame.new(ox, oy, oz)
+                mRoot.AssemblyLinearVelocity = Vector3.zero
+            end
+        end
+    end)
+end
+
 local function FreezeMobPart(mob, targetCF)
     local hum = mob:FindFirstChildOfClass("Humanoid")
     local mRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
     if not hum or hum.Health <= 0 or not mRoot then return end
 
+    SaveMobOrigin(mob, mRoot)
     DisableMobCollision(mob)
     mRoot.AssemblyLinearVelocity = Vector3.zero
     mRoot.AssemblyAngularVelocity = Vector3.zero
@@ -1164,6 +1194,13 @@ local function BringMob(primaryMob)
     local primHRP = primaryMob:FindFirstChild("HumanoidRootPart")
     if not primHRP then return end
 
+    -- Wait until player is close enough to hold network ownership before dragging secondary mobs
+    local char = LocalPlayer.Character
+    local playerHRP = char and char:FindFirstChild("HumanoidRootPart")
+    if not playerHRP or (playerHRP.Position - primHRP.Position).Magnitude > 75 then
+        return
+    end
+
     EnsureSimulationRadius()
 
     if LastBringMob ~= primaryMob then
@@ -1176,11 +1213,13 @@ local function BringMob(primaryMob)
     local enemies = Workspace:FindFirstChild("Enemies")
     if not enemies then return end
 
+    local now = tick()
     local count = 1
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob ~= primaryMob and mob.Name == primaryMob.Name and IsMobAlive(mob) and not mob:GetAttribute("IgnoreGrab") then
+        local ignUntil = mob:GetAttribute("IgnoreBringUntil") or 0
+        if mob ~= primaryMob and mob.Name == primaryMob.Name and IsMobAlive(mob) and not mob:GetAttribute("IgnoreGrab") and now >= ignUntil then
             local mRoot = mob:FindFirstChild("HumanoidRootPart")
-            if mRoot and (mRoot.Position - primHRP.Position).Magnitude <= 250 and count < 5 then
+            if mRoot and (mRoot.Position - primHRP.Position).Magnitude <= 160 and count < 4 then
                 FreezeMobPart(mob, BringSpawnCF * CFrame.new(0, math.random(0, 1), math.random(0, 1)))
                 count = count + 1
             end
@@ -1193,7 +1232,7 @@ local function FireFallbackClick(tool)
         if tool then tool:Activate() end
         if VirtualUser then
             VirtualUser:CaptureController()
-            VirtualUser:Button1Down(Vector2.zero)
+            VirtualUser:ClickButton1(Vector2.zero)
         end
     end)
 end
@@ -1238,7 +1277,7 @@ local function Attack()
         local primaryMob = hitTargets[1][1]
         local primaryPart = hitTargets[1][2]
 
-        -- Track damage progress so stalled combat channels reset and fall back automatically
+        -- Damage watchdog: cycle combat channel & trigger M1 click if target HP stalls
         local targetHum = primaryMob and primaryMob:FindFirstChildOfClass("Humanoid")
         local curHP = targetHum and targetHum.Health
         local needsFallbackClick = false
@@ -1250,7 +1289,7 @@ local function Attack()
             elseif curHP < (CombatNet.LastTargetHP or curHP) then
                 CombatNet.LastTargetHP = curHP
                 CombatNet.LastDamageAt = tick()
-            elseif (tick() - CombatNet.LastDamageAt) > 2.0 then
+            elseif (tick() - CombatNet.LastDamageAt) > 1.8 then
                 CombatNet.LastDamageAt = tick()
                 CombatNet.SendHitsFn = nil
                 CombatNet.SkipSendHitsUntil = tick() + 10
@@ -1274,28 +1313,12 @@ local function Attack()
 
         local sentAny = false
 
-        -- Channel A: Encrypted Seeded Remote (Latest Blox Fruits combat update)
-        local seedVal = RefreshCombatSeedAsync()
-        if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil then
-            local encOk = pcall(function()
-                local xorKey = math.floor(Workspace:GetServerTimeNow() / 10 % 10) + 1
-                local encName = string.gsub("RE/RegisterHit", ".", function(ch)
-                    return string.char(bit32.bxor(string.byte(ch), xorKey))
-                end)
-                local remoteObj = (typeof(cloneref) == "function" and cloneref(CombatNet.EncRemote)) or CombatNet.EncRemote
-                remoteObj:FireServer(encName, bit32.bxor(CombatNet.EncId + 909090, seedVal * 2), primaryPart, hitTargets)
-            end)
-            if encOk then sentAny = true end
-        end
-
-        -- Channel B: Native SendHitsToServer (COMBAT_REMOTE_THREAD) at game thread identity
-        local sendOk = false
+        -- Fire ONE primary hit channel per swing to stay under server rate limits
+        -- 1) Prefer Native SendHitsToServer when captured and healthy
         if tick() >= (CombatNet.SkipSendHitsUntil or 0) then
             local sendFn = ResolveSendHitsToServer()
             if sendFn then
-                local ok = CallAsGameThread(sendFn, primaryPart, hitTargets)
-                if ok then
-                    sendOk = true
+                if CallAsGameThread(sendFn, primaryPart, hitTargets) then
                     sentAny = true
                 else
                     CombatNet.SendHitsFn = nil
@@ -1304,8 +1327,24 @@ local function Attack()
             end
         end
 
-        -- Channel C: Tokenized RE/RegisterHit with ALL targets preserved (never table.remove primary)
-        if (not sendOk) and RegisterHitRemote then
+        -- 2) Else try Encrypted Seeded Remote (2025/2026 Blox Fruits update)
+        if not sentAny then
+            local seedVal = RefreshCombatSeedAsync()
+            if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil then
+                local encOk = pcall(function()
+                    local xorKey = math.floor(Workspace:GetServerTimeNow() / 10 % 10) + 1
+                    local encName = string.gsub("RE/RegisterHit", ".", function(ch)
+                        return string.char(bit32.bxor(string.byte(ch), xorKey))
+                    end)
+                    local remoteObj = (typeof(cloneref) == "function" and cloneref(CombatNet.EncRemote)) or CombatNet.EncRemote
+                    remoteObj:FireServer(encName, bit32.bxor(CombatNet.EncId + 909090, seedVal * 2), primaryPart, hitTargets)
+                end)
+                if encOk then sentAny = true end
+            end
+        end
+
+        -- 3) Else fall back to 4-arg Tokenized RE/RegisterHit preserving all targets
+        if (not sentAny) and RegisterHitRemote then
             if not CombatNet.HitToken then
                 local coSuffix = tostring(coroutine.running()):sub(11, 15)
                 if coSuffix == "" then coSuffix = tostring(math.random(10000, 99999)) end
@@ -1323,7 +1362,7 @@ end
 
 task.spawn(function()
     while (runtime and runtime.alive) do
-        task.wait(0.03)
+        task.wait(0.065)
         Attack()
     end
 end)
@@ -3404,6 +3443,35 @@ CreateHUD()
 -- ====================================================================
 -- 13. MASTER AUTONOMOUS PROGRESSION LOOP (1 TO MAX 2550+)
 -- ====================================================================
+local FarmWatchdog = { Mob = nil, HP = nil, Since = 0 }
+local SpawnPatrolIdx = 1
+local SpawnPatrolAt = 0
+
+local function FindMobSpawnWaitCF(mobName, fallbackPosM)
+    local spawns = {}
+    local worldOrigin = Workspace:FindFirstChild("_WorldOrigin")
+    local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
+    if enemySpawns and mobName then
+        for _, sp in ipairs(enemySpawns:GetChildren()) do
+            if sp.Name:sub(1, #mobName) == mobName then
+                local pos = sp:IsA("BasePart") and sp.Position or (sp:IsA("Model") and sp:GetPivot().Position)
+                if pos then
+                    table.insert(spawns, pos)
+                end
+            end
+        end
+    end
+    if #spawns > 0 then
+        if (tick() - SpawnPatrolAt) > 2.5 then
+            SpawnPatrolAt = tick()
+            SpawnPatrolIdx = (SpawnPatrolIdx % #spawns) + 1
+        end
+        local idx = ((SpawnPatrolIdx - 1) % #spawns) + 1
+        return CFrame.new(spawns[idx] + Vector3.new(0, 25, 0))
+    end
+    return CFrame.new(fallbackPosM.Position + Vector3.new(0, 25, 0))
+end
+
 task.spawn(function()
     while (runtime and runtime.alive) do
         task.wait(0.1)
@@ -3504,34 +3572,62 @@ task.spawn(function()
                 EquipWeapon()
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
+                local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local now = tick()
                 if enemies then
-                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     local refPos = (hrp and hrp.Position) or quest.PosM.Position
                     local bestExactDist, bestPrefDist = math.huge, math.huge
-                    local exactMob, prefMob = nil, nil
+                    local exactMob, prefMob, fallbackMob = nil, nil, nil
+                    local bestFallbackDist = math.huge
                     for _, mob in ipairs(enemies:GetChildren()) do
                         if IsMobAlive(mob) then
                             local mRoot = mob:FindFirstChild("HumanoidRootPart")
                             local dist = mRoot and (mRoot.Position - refPos).Magnitude or math.huge
-                            if mob.Name == quest.Mob then
-                                if dist < bestExactDist then
-                                    bestExactDist = dist
-                                    exactMob = mob
-                                end
-                            elseif mob.Name:sub(1, #quest.Mob) == quest.Mob and not mob.Name:find("Escap") then
-                                if dist < bestPrefDist then
+                            local isMatch = (mob.Name == quest.Mob) or (mob.Name:sub(1, #quest.Mob) == quest.Mob and not mob.Name:find("Escap"))
+                            if isMatch then
+                                local ignoreUntil = mob:GetAttribute("IgnoreTargetUntil") or 0
+                                if now < ignoreUntil then
+                                    if dist < bestFallbackDist then
+                                        bestFallbackDist = dist
+                                        fallbackMob = mob
+                                    end
+                                elseif mob.Name == quest.Mob then
+                                    if dist < bestExactDist then
+                                        bestExactDist = dist
+                                        exactMob = mob
+                                    end
+                                elseif dist < bestPrefDist then
                                     bestPrefDist = dist
                                     prefMob = mob
                                 end
                             end
                         end
                     end
-                    targetMob = exactMob or prefMob
+                    targetMob = exactMob or prefMob or fallbackMob
                 end
 
                 if targetMob then
                     local mobHRP = targetMob:FindFirstChild("HumanoidRootPart")
-                    if mobHRP then
+                    local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
+                    if mobHRP and mobHum then
+                        -- Release & move on if a brought/glitched mob takes zero damage for 2.5s
+                        if hrp and (hrp.Position - mobHRP.Position).Magnitude <= 40 then
+                            if FarmWatchdog.Mob ~= targetMob then
+                                FarmWatchdog.Mob = targetMob
+                                FarmWatchdog.HP = mobHum.Health
+                                FarmWatchdog.Since = now
+                            elseif mobHum.Health < (FarmWatchdog.HP or mobHum.Health) then
+                                FarmWatchdog.HP = mobHum.Health
+                                FarmWatchdog.Since = now
+                            elseif (now - FarmWatchdog.Since) >= 2.5 then
+                                ReleaseMob(targetMob)
+                                targetMob:SetAttribute("IgnoreBringUntil", now + 12)
+                                targetMob:SetAttribute("IgnoreTargetUntil", now + 4)
+                                FarmWatchdog.Mob = nil
+                                return
+                            end
+                        end
+
                         local isPrisoner = (targetMob.Name == "Prisoner" or targetMob.Name == "Dangerous Prisoner" or targetMob.Name:find("Prisoner"))
                         local isEscapedPrisoner = targetMob.Name:find("Escap") or targetMob.Name:find("Puncher") or (targetMob:FindFirstChildWhichIsA("ProximityPrompt", true) ~= nil)
                         if isEscapedPrisoner and not targetMob:GetAttribute("Confronted") then
@@ -3557,12 +3653,13 @@ task.spawn(function()
                                 targetMob:SetAttribute("Confronted", true)
                             end)
                         end
-                        BringMob(targetMob)
                         local farmCF = isPrisoner and (mobHRP.CFrame * CFrame.new(0, 3, -4)) or GetFarmCFrame(mobHRP)
                         toTarget(farmCF, 5)
+                        BringMob(targetMob)
                     end
                 else
-                    toTarget(CFrame.new(quest.PosM.Position + Vector3.new(0, 25, 0)), 10)
+                    FarmWatchdog.Mob = nil
+                    toTarget(FindMobSpawnWaitCF(quest.Mob, quest.PosM), 10)
                 end
             end
         end)
