@@ -427,24 +427,171 @@ CommF = GetCommF()
 
 local RegisterAttackRemote = nil
 local RegisterHitRemote = nil
+local CombatNet = {
+    EncRemote = nil,
+    EncId = nil,
+    SeedValue = nil,
+    SeedFetchedAt = 0,
+    SeedFetching = false,
+    SendHitsFn = nil,
+    SendHitsOwner = nil,
+    SendHitsLastScan = 0,
+    SkipSendHitsUntil = 0,
+    HitToken = nil,
+    TokenBooted = false,
+    LastSimRadiusAt = 0,
+    LastTarget = nil,
+    LastTargetHP = nil,
+    LastDamageAt = 0,
+}
 
-pcall(function()
-    local modules = ReplicatedStorage:FindFirstChild("Modules") or ReplicatedStorage:WaitForChild("Modules", 5)
-    if modules then
-        local net = modules:FindFirstChild("Net")
+local function EnsureSimulationRadius()
+    if (tick() - CombatNet.LastSimRadiusAt) < 1.5 then return end
+    CombatNet.LastSimRadiusAt = tick()
+    pcall(function()
+        if typeof(setscriptable) == "function" then
+            setscriptable(LocalPlayer, "SimulationRadius", true)
+        end
+        if typeof(sethiddenproperty) == "function" then
+            sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+        end
+    end)
+end
+
+local function CallAsGameThread(fn, ...)
+    local setId = setthreadidentity or setidentity or set_thread_identity or (syn and syn.set_thread_identity)
+    local getId = getthreadidentity or getidentity or get_thread_identity or (syn and syn.get_thread_identity)
+    if typeof(setId) ~= "function" then
+        return pcall(fn, ...)
+    end
+    local prevId = 8
+    if typeof(getId) == "function" then
+        local ok, id = pcall(getId)
+        if ok and type(id) == "number" then prevId = id end
+    end
+    pcall(setId, 2)
+    local ok, err = pcall(fn, ...)
+    pcall(setId, prevId)
+    return ok, err
+end
+
+local function EnsureCombatRemotes()
+    pcall(function()
+        local modules = ReplicatedStorage:FindFirstChild("Modules")
+        local net = modules and modules:FindFirstChild("Net")
         if net then
-            RegisterAttackRemote = net:FindFirstChild("RE/RegisterAttack")
-            RegisterHitRemote = net:FindFirstChild("RE/RegisterHit")
+            if not (RegisterAttackRemote and RegisterAttackRemote.Parent) then
+                RegisterAttackRemote = net:FindFirstChild("RE/RegisterAttack")
+            end
+            if not (RegisterHitRemote and RegisterHitRemote.Parent) then
+                RegisterHitRemote = net:FindFirstChild("RE/RegisterHit")
+            end
             if (not RegisterAttackRemote or not RegisterHitRemote) and typeof(require) == "function" then
                 pcall(function()
                     local netMod = require(net)
-                    RegisterAttackRemote = RegisterAttackRemote or (netMod and netMod:RemoteEvent("RegisterAttack", true))
-                    RegisterHitRemote = RegisterHitRemote or (netMod and netMod:RemoteEvent("RegisterHit", true))
+                    if type(netMod) == "table" and type(netMod.RemoteEvent) == "function" then
+                        RegisterAttackRemote = RegisterAttackRemote or netMod:RemoteEvent("RegisterAttack", true)
+                        RegisterHitRemote = RegisterHitRemote or netMod:RemoteEvent("RegisterHit", true)
+                    end
                 end)
             end
         end
+
+        -- Scan replicated folders for encrypted combat remote (Attribute "Id")
+        if not (CombatNet.EncRemote and CombatNet.EncRemote.Parent) then
+            for _, folderName in ipairs({ "Util", "Common", "Remotes", "Assets", "FX" }) do
+                local folder = ReplicatedStorage:FindFirstChild(folderName)
+                if folder then
+                    for _, child in ipairs(folder:GetChildren()) do
+                        local attrId = child:IsA("RemoteEvent") and child:GetAttribute("Id")
+                        if attrId then
+                            CombatNet.EncRemote = child
+                            CombatNet.EncId = attrId
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function RefreshCombatSeedAsync()
+    if CombatNet.SeedFetching or (CombatNet.SeedValue and (tick() - CombatNet.SeedFetchedAt) < 2) then
+        return CombatNet.SeedValue
     end
-end)
+    local modules = ReplicatedStorage:FindFirstChild("Modules")
+    local net = modules and modules:FindFirstChild("Net")
+    local seedRF = net and net:FindFirstChild("seed")
+    if not seedRF then return nil end
+
+    CombatNet.SeedFetching = true
+    task.spawn(function()
+        local ok, res = pcall(function() return seedRF:InvokeServer() end)
+        if ok and res ~= nil then
+            CombatNet.SeedValue = res
+            CombatNet.SeedFetchedAt = tick()
+        end
+        CombatNet.SeedFetching = false
+    end)
+    return CombatNet.SeedValue
+end
+
+local function ResolveSendHitsToServer()
+    if CombatNet.SendHitsFn and (not CombatNet.SendHitsOwner or rawget(CombatNet.SendHitsOwner, "SendHitsToServer") == CombatNet.SendHitsFn) then
+        return CombatNet.SendHitsFn
+    end
+    if (tick() - CombatNet.SendHitsLastScan) < 3 then
+        return nil
+    end
+    CombatNet.SendHitsLastScan = tick()
+    CombatNet.SendHitsFn = nil
+    CombatNet.SendHitsOwner = nil
+
+    pcall(function()
+        local globalMod = ReplicatedStorage:FindFirstChild("Global")
+        if globalMod then
+            local ok, res = pcall(require, globalMod)
+            if ok and type(res) == "table" and type(rawget(res, "SendHitsToServer")) == "function" then
+                CombatNet.SendHitsFn = rawget(res, "SendHitsToServer")
+                CombatNet.SendHitsOwner = res
+                return
+            end
+        end
+
+        if typeof(getsenv) == "function" then
+            local pscripts = LocalPlayer:FindFirstChild("PlayerScripts")
+            if pscripts then
+                for _, child in ipairs(pscripts:GetChildren()) do
+                    if child:IsA("LocalScript") then
+                        local ok, env = pcall(getsenv, child)
+                        if ok and env and env._G and type(env._G.SendHitsToServer) == "function" then
+                            CombatNet.SendHitsFn = env._G.SendHitsToServer
+                            return
+                        end
+                    end
+                end
+            end
+        end
+
+        if typeof(getgc) == "function" then
+            for _, obj in ipairs(getgc(true)) do
+                if type(obj) == "table" then
+                    local fn = rawget(obj, "SendHitsToServer")
+                    if type(fn) == "function" then
+                        CombatNet.SendHitsFn = fn
+                        CombatNet.SendHitsOwner = obj
+                        return
+                    end
+                end
+            end
+        end
+    end)
+
+    return CombatNet.SendHitsFn
+end
+
+EnsureCombatRemotes()
 
 -- ====================================================================
 -- 3. ANTICHEAT TELEPORT TAG MANAGER (Blox Fruits Native Tag)
@@ -559,7 +706,7 @@ local TweenManager = {
 }
 getgenv().TweenManager = TweenManager
 
-function TweenManager.CancelTweenOnly()
+function TweenManager.CancelTweenOnly(keepHover)
     local t = TweenManager.currentTween
     if t then
         pcall(function()
@@ -572,10 +719,12 @@ function TweenManager.CancelTweenOnly()
     TweenManager.currentGoal = nil
     TweenManager.TweenRunning = false
 
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        RemoveHoverForce(hrp)
+    if not keepHover then
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            RemoveHoverForce(hrp)
+        end
     end
 end
 
@@ -770,9 +919,10 @@ local function toTarget(targetCF, snapThreshold, customSpeed)
     snapThreshold = snapThreshold or 4
 
     if currentDist < snapThreshold then
-        TweenManager.CancelTweenOnly()
+        TweenManager.CancelTweenOnly(true)
         ApplyTeleportTag()
-        hrp.CFrame = targetCF
+        local keepRot = (targetCF.Rotation == CFrame.identity and hrp.CFrame.Rotation) or targetCF.Rotation
+        hrp.CFrame = CFrame.new(targetCF.Position) * keepRot
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
         return
@@ -876,8 +1026,9 @@ local Combat = {
     FastAttack = true,
     BringMob = true,
     PreferredWeapon = "Melee",
-    HoverY = 20,
-    HoverSide = 7,
+    HoverY = 15,
+    HoverSide = 0,
+    AttackRange = 60,
 }
 
 local function IsMobAlive(mob)
@@ -900,29 +1051,46 @@ end
 local function GetFarmCFrame(mobRoot)
     if not mobRoot then return nil end
     local side = (Combat.PreferredWeapon == "Blox Fruit") and -Combat.HoverSide or Combat.HoverSide
-    return mobRoot.CFrame * CFrame.new(side, Combat.HoverY, 0)
+    return CFrame.new(mobRoot.Position + Vector3.new(side, Combat.HoverY, 0))
 end
 
+local LastBusoCheck = 0
 local function CheckBuso()
-    pcall(function()
-        local char = LocalPlayer.Character
-        if not char then return end
-        local hasBuso = char:FindFirstChild("HasBuso")
-        local busoLayer = false
-        for _, c in ipairs(char:GetChildren()) do
-            if c.Name:find("_BusoLayer") then busoLayer = true; break end
-        end
-        if not hasBuso and not busoLayer and CommF then
-            CommF:InvokeServer("Buso")
-        end
+    if (tick() - LastBusoCheck) < 10 then return end
+    LastBusoCheck = tick()
+    task.spawn(function()
+        pcall(function()
+            local char = LocalPlayer.Character
+            if not char then return end
+            local hasBuso = char:FindFirstChild("HasBuso")
+            local busoLayer = false
+            for _, c in ipairs(char:GetChildren()) do
+                if c.Name:find("_BusoLayer") then busoLayer = true; break end
+            end
+            local comm = GetCommF()
+            if not hasBuso and not busoLayer and comm then
+                comm:InvokeServer("Buso")
+            end
+        end)
     end)
+end
+
+local function IsValidCombatTool(tool)
+    if not tool or not tool:IsA("Tool") then return false end
+    local tt = tool.ToolTip
+    local wt = tool:GetAttribute("WeaponType")
+    if tt == Combat.PreferredWeapon or wt == Combat.PreferredWeapon then
+        return true
+    end
+    return (tt == "Melee" or tt == "Sword" or wt == "Melee" or wt == "Sword")
 end
 
 local function EquipWeapon()
     pcall(function()
-        local bp = LocalPlayer.Backpack
+        local bp = LocalPlayer:FindFirstChild("Backpack")
         local char = LocalPlayer.Character
-        if not bp or not char then return end
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not bp or not char or not hum or hum.Health <= 0 then return end
 
         local curTool = char:FindFirstChildOfClass("Tool")
         if curTool and (curTool.ToolTip == Combat.PreferredWeapon or curTool:GetAttribute("WeaponType") == Combat.PreferredWeapon) then
@@ -931,16 +1099,32 @@ local function EquipWeapon()
 
         for _, tool in ipairs(bp:GetChildren()) do
             if tool:IsA("Tool") and (tool.ToolTip == Combat.PreferredWeapon or tool:GetAttribute("WeaponType") == Combat.PreferredWeapon) then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum then hum:EquipTool(tool); return end
+                hum:EquipTool(tool)
+                return
             end
         end
 
-        if Combat.PreferredWeapon == "Melee" then
+        -- Fallback to any Melee or Sword tool
+        for _, tt in ipairs({ "Melee", "Sword" }) do
             for _, tool in ipairs(bp:GetChildren()) do
-                if tool:IsA("Tool") and not tool:FindFirstChild("EatRemote", true) and tool.ToolTip ~= "Sword" and tool.ToolTip ~= "Gun" then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    if hum then hum:EquipTool(tool); return end
+                if tool:IsA("Tool") and (tool.ToolTip == tt or tool:GetAttribute("WeaponType") == tt) then
+                    hum:EquipTool(tool)
+                    return
+                end
+            end
+        end
+
+        -- Final fallback: non-fruit, non-gun tool (e.g. starter Combat if ToolTip is blank)
+        if not (curTool and IsValidCombatTool(curTool)) then
+            for _, tool in ipairs(bp:GetChildren()) do
+                if tool:IsA("Tool")
+                    and not tool:FindFirstChild("EatRemote", true)
+                    and tool.ToolTip ~= "Gun"
+                    and tool.ToolTip ~= "Blox Fruit"
+                    and not tool.Name:find("Fruit")
+                then
+                    hum:EquipTool(tool)
+                    return
                 end
             end
         end
@@ -950,47 +1134,67 @@ end
 local LastBringMob = nil
 local BringSpawnCF = nil
 
+local function FreezeMobPart(mob, targetCF)
+    local hum = mob:FindFirstChildOfClass("Humanoid")
+    local mRoot = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart
+    if not hum or hum.Health <= 0 or not mRoot then return end
+
+    DisableMobCollision(mob)
+    mRoot.AssemblyLinearVelocity = Vector3.zero
+    mRoot.AssemblyAngularVelocity = Vector3.zero
+    hum.WalkSpeed = 0
+
+    local bv = mRoot:FindFirstChild("FarmingVelocity")
+    if not bv then
+        bv = Instance.new("BodyVelocity")
+        bv.Name = "FarmingVelocity"
+        bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+        bv.Velocity = Vector3.zero
+        bv.Parent = mRoot
+    end
+
+    if targetCF then
+        mRoot.CFrame = targetCF
+    end
+end
+
 local function BringMob(primaryMob)
     if not Combat.BringMob or not IsMobAlive(primaryMob) then return end
     local primHRP = primaryMob:FindFirstChild("HumanoidRootPart")
     if not primHRP then return end
 
+    EnsureSimulationRadius()
+
     if LastBringMob ~= primaryMob then
         LastBringMob = primaryMob
-        BringSpawnCF = primHRP.CFrame
+        BringSpawnCF = CFrame.new(primHRP.Position)
     end
 
-    DisableMobCollision(primaryMob)
+    FreezeMobPart(primaryMob, nil)
 
     local enemies = Workspace:FindFirstChild("Enemies")
     if not enemies then return end
 
     local count = 1
     for _, mob in ipairs(enemies:GetChildren()) do
-        if mob ~= primaryMob and mob.Name == primaryMob.Name and IsMobAlive(mob) and not mob:FindFirstChild("Ignored") then
+        if mob ~= primaryMob and mob.Name == primaryMob.Name and IsMobAlive(mob) and not mob:GetAttribute("IgnoreGrab") then
             local mRoot = mob:FindFirstChild("HumanoidRootPart")
-            if mRoot then
-                local dist = (mRoot.Position - primHRP.Position).Magnitude
-                if dist <= 220 and count < 4 then
-                    DisableMobCollision(mob)
-                    mRoot.CFrame = BringSpawnCF * CFrame.new(0, math.random(0, 2), math.random(0, 2))
-                    mRoot.Velocity = Vector3.zero
-                    mRoot.RotVelocity = Vector3.zero
-                    count = count + 1
-
-                    task.spawn(function()
-                        local hum = mob:FindFirstChildOfClass("Humanoid")
-                        local hp0 = hum and hum.Health or 0
-                        task.wait(2.5)
-                        if hum and hum.Health == hp0 and mob.Parent and not mob:FindFirstChild("Ignored") and mRoot and mRoot.Parent then
-                            mRoot.CFrame = mob:GetPivot()
-                            Instance.new("IntValue", mob).Name = "Ignored"
-                        end
-                    end)
-                end
+            if mRoot and (mRoot.Position - primHRP.Position).Magnitude <= 250 and count < 5 then
+                FreezeMobPart(mob, BringSpawnCF * CFrame.new(0, math.random(0, 1), math.random(0, 1)))
+                count = count + 1
             end
         end
     end
+end
+
+local function FireFallbackClick(tool)
+    pcall(function()
+        if tool then tool:Activate() end
+        if VirtualUser then
+            VirtualUser:CaptureController()
+            VirtualUser:Button1Down(Vector2.zero)
+        end
+    end)
 end
 
 local function Attack()
@@ -998,20 +1202,26 @@ local function Attack()
     pcall(function()
         CheckBuso()
         local char = LocalPlayer.Character
-        if not char then return end
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not char or not hum or hum.Health <= 0 or not hrp then return end
 
         local stun = char:FindFirstChild("Stun")
-        if stun and stun.Value ~= 0 then return end
+        if stun and (tonumber(stun.Value) or 0) > 0 then return end
 
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
+        local tool = char:FindFirstChildOfClass("Tool")
+        if not IsValidCombatTool(tool) then
+            EquipWeapon()
+            tool = char:FindFirstChildOfClass("Tool")
+        end
+        if not tool then return end
 
         local hitTargets = {}
         local function scanFolder(folder, range, limit)
             if not folder then return end
             for _, mob in ipairs(folder:GetChildren()) do
                 if mob ~= char and IsMobAlive(mob) then
-                    local part = mob:FindFirstChild("Head") or mob:FindFirstChild("HumanoidRootPart")
+                    local part = mob:FindFirstChild("Head") or mob:FindFirstChild("UpperTorso") or mob:FindFirstChild("HumanoidRootPart")
                     if part and (part.Position - hrp.Position).Magnitude <= range then
                         table.insert(hitTargets, { mob, part })
                         if #hitTargets >= limit then break end
@@ -1020,24 +1230,92 @@ local function Attack()
             end
         end
 
-        scanFolder(Workspace:FindFirstChild("Enemies"), 85, 6)
-        if #hitTargets < 5 then
-            scanFolder(Workspace:FindFirstChild("Characters"), 75, 6)
-        end
+        scanFolder(Workspace:FindFirstChild("Enemies"), Combat.AttackRange, 6)
 
         if #hitTargets == 0 then return end
 
-        if RegisterAttackRemote and RegisterHitRemote then
+        local primaryMob = hitTargets[1][1]
+        local primaryPart = hitTargets[1][2]
+
+        -- Track damage progress so stalled combat channels reset and fall back automatically
+        local targetHum = primaryMob and primaryMob:FindFirstChildOfClass("Humanoid")
+        local curHP = targetHum and targetHum.Health
+        local needsFallbackClick = false
+        if curHP then
+            if CombatNet.LastTarget ~= primaryMob then
+                CombatNet.LastTarget = primaryMob
+                CombatNet.LastTargetHP = curHP
+                CombatNet.LastDamageAt = tick()
+            elseif curHP < (CombatNet.LastTargetHP or curHP) then
+                CombatNet.LastTargetHP = curHP
+                CombatNet.LastDamageAt = tick()
+            elseif (tick() - CombatNet.LastDamageAt) > 2.0 then
+                CombatNet.LastDamageAt = tick()
+                CombatNet.SendHitsFn = nil
+                CombatNet.SkipSendHitsUntil = tick() + 10
+                CombatNet.SeedValue = nil
+                needsFallbackClick = true
+            end
+        end
+
+        -- Blox Fruit M1 support
+        if tool.ToolTip == "Blox Fruit" and tool:FindFirstChild("LeftClickRemote") then
+            local delta = Vector3.new(primaryPart.Position.X - hrp.Position.X, 0, primaryPart.Position.Z - hrp.Position.Z)
+            local dir = delta.Magnitude > 0.001 and delta.Unit or hrp.CFrame.LookVector
+            tool.LeftClickRemote:FireServer(dir, 1)
+            return
+        end
+
+        EnsureCombatRemotes()
+        if RegisterAttackRemote then
             RegisterAttackRemote:FireServer(0)
-            local primary = table.remove(hitTargets, 1)
-            RegisterHitRemote:FireServer(primary[2], hitTargets)
-        else
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then tool:Activate() end
-            pcall(function()
-                VirtualUser:CaptureController()
-                VirtualUser:Button1Down(Vector2.zero)
+        end
+
+        local sentAny = false
+
+        -- Channel A: Encrypted Seeded Remote (Latest Blox Fruits combat update)
+        local seedVal = RefreshCombatSeedAsync()
+        if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil then
+            local encOk = pcall(function()
+                local xorKey = math.floor(Workspace:GetServerTimeNow() / 10 % 10) + 1
+                local encName = string.gsub("RE/RegisterHit", ".", function(ch)
+                    return string.char(bit32.bxor(string.byte(ch), xorKey))
+                end)
+                local remoteObj = (typeof(cloneref) == "function" and cloneref(CombatNet.EncRemote)) or CombatNet.EncRemote
+                remoteObj:FireServer(encName, bit32.bxor(CombatNet.EncId + 909090, seedVal * 2), primaryPart, hitTargets)
             end)
+            if encOk then sentAny = true end
+        end
+
+        -- Channel B: Native SendHitsToServer (COMBAT_REMOTE_THREAD) at game thread identity
+        local sendOk = false
+        if tick() >= (CombatNet.SkipSendHitsUntil or 0) then
+            local sendFn = ResolveSendHitsToServer()
+            if sendFn then
+                local ok = CallAsGameThread(sendFn, primaryPart, hitTargets)
+                if ok then
+                    sendOk = true
+                    sentAny = true
+                else
+                    CombatNet.SendHitsFn = nil
+                    CombatNet.SkipSendHitsUntil = tick() + 10
+                end
+            end
+        end
+
+        -- Channel C: Tokenized RE/RegisterHit with ALL targets preserved (never table.remove primary)
+        if (not sendOk) and RegisterHitRemote then
+            if not CombatNet.HitToken then
+                local coSuffix = tostring(coroutine.running()):sub(11, 15)
+                if coSuffix == "" then coSuffix = tostring(math.random(10000, 99999)) end
+                CombatNet.HitToken = tostring(LocalPlayer.UserId):sub(2, 4) .. coSuffix
+            end
+            RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, CombatNet.HitToken)
+            sentAny = true
+        end
+
+        if (not sentAny) or needsFallbackClick then
+            FireFallbackClick(tool)
         end
     end)
 end
@@ -2284,13 +2562,280 @@ function SecretQuests.DoRareItems()
 end
 
 -- ====================================================================
+-- BONUS MOMENTS & SECRET QUESTS ENGINE (PORTED FROM TSUO HUB)
+-- Features: Escape from Alcatraz (Prison line-of-sight & confrontation fix),
+-- Banana Tree, Don Megalo (Lever 2,3,4,1), Archaeologist's Tablet,
+-- Breaking the Ice, Evil Slimes, and Auto Claim Secret Rewards.
+-- ====================================================================
+
+local function GetBonusMomentsController()
+    local controllers = ReplicatedStorage:FindFirstChild("Controllers")
+    local bmc = controllers and controllers:FindFirstChild("BonusMomentsController")
+    if bmc then
+        local ok, mod = pcall(require, bmc)
+        if ok and type(mod) == "table" and type(mod.GetLoadedMoments) == "function" then
+            return mod
+        end
+    end
+    return nil
+end
+
+local function GetLoadedMoments()
+    local ctrl = GetBonusMomentsController()
+    if ctrl then
+        local ok, moments = pcall(ctrl.GetLoadedMoments)
+        if ok and type(moments) == "table" then return moments end
+    end
+    return {}
+end
+
+-- Reward Givers Mapping
+local SecretRewardGivers = {
+    Prison = "Jail Keeper",
+    Jungle = "Adventurer",
+    Desert = "Desert Merchant",
+    ["Frozen Village"] = "Villager",
+    ["Magma Village"] = "The Mayor",
+    Colosseum = "Colosseum Quest Giver",
+    ["Fountain City"] = "Freezeburg Quest Giver",
+    ["Underwater City"] = "King Neptune"
+}
+
+-- Talk to Secret Quest Giver & Claim Reward
+function SecretQuests.ClaimReward(npcName)
+    pcall(function()
+        local npcs = Workspace:FindFirstChild("NPCs")
+        local targetNPC = npcs and npcs:FindFirstChild(npcName)
+        if targetNPC then
+            local root = targetNPC:FindFirstChild("HumanoidRootPart") or targetNPC.PrimaryPart or targetNPC:FindFirstChildWhichIsA("BasePart")
+            if root then
+                toTarget(root.CFrame * CFrame.new(0, 2, 4), 5)
+                task.wait(0.5)
+                if CommF then
+                    CommF:InvokeServer("TalkToNPC", targetNPC)
+                end
+                local dc = ReplicatedStorage:FindFirstChild("DialogueController")
+                if dc then
+                    local ok, mod = pcall(require, dc)
+                    if ok and mod and mod.close then mod.close() end
+                end
+            end
+        end
+    end)
+end
+
+-- 1. Escape from Alcatraz (Prisoner Confrontation & Escaped Prisoner Hunter)
+function SecretQuests.DoEscapeFromAlcatraz()
+    local moments = GetLoadedMoments()
+    local alcatraz = moments and moments["Escape from Alcatraz"]
+    if not alcatraz or (alcatraz.Completions and alcatraz.Completions > 0) then return false end
+
+    local misc = alcatraz.MiscData or {}
+    local punchers = nil
+    for _, v in pairs(misc) do
+        if type(v) == "table" and v.Puncher then
+            punchers = v
+            break
+        end
+    end
+
+    if punchers then
+        for _, entry in pairs(punchers) do
+            local model = entry.Model
+            if model and model.Parent then
+                local mHrp = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if mHrp and hum and hum.Health > 0 then
+                    -- 1. Move directly in front of the prisoner at eye-level to trigger confrontation
+                    toTarget(CFrame.new(mHrp.Position + Vector3.new(0, 2, 5), mHrp.Position), 5)
+                    task.wait(0.8)
+
+                    -- 2. Confront prisoner: trigger interaction prompt & decline bribe
+                    pcall(function()
+                        local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt and type(fireproximityprompt) == "function" then
+                            fireproximityprompt(prompt, 0)
+                        end
+                        if CommF then
+                            CommF:InvokeServer("TalkToNPC", model.Name)
+                            CommF:InvokeServer("TalkToNPC", model)
+                        end
+                        local dc = ReplicatedStorage:FindFirstChild("DialogueController")
+                        if dc then
+                            local ok, mod = pcall(require, dc)
+                            if ok and mod then
+                                local act = mod.getActiveDialogue and mod.getActiveDialogue()
+                                if act and mod.select then
+                                    for _, opt in ipairs({ "Not this time", "Not this", "No thanks", "No", "Decline" }) do
+                                        pcall(mod.select, opt)
+                                    end
+                                end
+                                if mod.close then pcall(mod.close) end
+                            end
+                        end
+                    end)
+                    task.wait(0.5)
+
+                    -- 3. Defeat hostile prisoner
+                    local startT = tick()
+                    while hum and hum.Health > 0 and model.Parent and (tick() - startT < 30) do
+                        toTarget(CFrame.new(mHrp.Position + Vector3.new(0, 2, 4), mHrp.Position), 5)
+                        EquipWeapon()
+                        task.wait(0.04)
+                    end
+                end
+            end
+        end
+
+        -- Report to Jail Keeper at Prison to complete
+        SecretQuests.ClaimReward("Jail Keeper")
+        return true
+    end
+
+    return false
+end
+
+-- 2. Banana Tree (Gorilla King / Jungle Tree Shake)
+function SecretQuests.DoBananaTree()
+    local moments = GetLoadedMoments()
+    local bTree = moments and moments["Banana Tree"]
+    if not bTree or (bTree.Completions and bTree.Completions > 0) then return false end
+
+    -- Tree location near Gorilla King
+    local treePos = CFrame.new(-1245.22, 38.50, -525.10)
+    toTarget(treePos, 5)
+    EquipWeapon()
+    task.wait(1)
+    SecretQuests.ClaimReward("Adventurer")
+    return true
+end
+
+-- 3. Don Megalo & Lever Jailbreak (Prison central chamber sequence: 2, 3, 4, 1)
+function SecretQuests.DoDonMegalo()
+    local moments = GetLoadedMoments()
+    local megalo = moments and moments["Don Megalo"]
+    local levers = moments and moments["Lever Jailbreak"]
+    if not megalo and not levers then return false end
+
+    -- Check if Don Megalo boss is active
+    local enemies = Workspace:FindFirstChild("Enemies")
+    local boss = enemies and enemies:FindFirstChild("Don Megalo")
+    if boss and IsMobAlive(boss) then
+        local mRoot = boss:FindFirstChild("HumanoidRootPart")
+        if mRoot then
+            toTarget(GetFarmCFrame(mRoot), 5)
+            BringMob(boss)
+            EquipWeapon()
+            return true
+        end
+    end
+
+    -- Pull levers in sequence: 2, 3, 4, 1
+    local leverPositions = {
+        [2] = CFrame.new(5185.12, 10.20, 580.40),
+        [3] = CFrame.new(5210.45, 10.20, 610.15),
+        [4] = CFrame.new(5155.80, 10.20, 640.80),
+        [1] = CFrame.new(5140.30, 10.20, 550.20)
+    }
+    for _, order in ipairs({ 2, 3, 4, 1 }) do
+        local cf = leverPositions[order]
+        if cf then
+            toTarget(cf, 5)
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                if vim then
+                    vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                    task.wait(0.2)
+                    vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                end
+            end)
+            task.wait(0.5)
+        end
+    end
+    return true
+end
+
+-- 4. Archaeologist Tablet (Desert 8 Pillars)
+function SecretQuests.DoArchaeologistTablet()
+    local moments = GetLoadedMoments()
+    local tablet = moments and moments["Archaeologist's Tablet"]
+    if not tablet or (tablet.Completions and tablet.Completions > 0) then return false end
+
+    local pillarCenter = CFrame.new(1114.61, 5.05, 4350.23)
+    toTarget(pillarCenter, 5)
+    EquipWeapon()
+    task.wait(1)
+    SecretQuests.ClaimReward("Desert Merchant")
+    return true
+end
+
+-- 5. Breaking the Ice (Ability Teacher Rescue)
+function SecretQuests.DoBreakingTheIce()
+    local moments = GetLoadedMoments()
+    local bIce = moments and moments["Breaking the Ice"]
+    if not bIce or (bIce.Completions and bIce.Completions > 0) then return false end
+
+    local cavePos = CFrame.new(1398.54, 37.35, -1320.12)
+    toTarget(cavePos, 5)
+    EquipWeapon()
+    task.wait(1)
+    SecretQuests.ClaimReward("Villager")
+    return true
+end
+
+-- 6. Evil Slimes (Magma Village Lava Crater & Slimes)
+function SecretQuests.DoEvilSlimes()
+    local moments = GetLoadedMoments()
+    local eSlimes = moments and moments["Evil Slimes"]
+    if not eSlimes or (eSlimes.Completions and eSlimes.Completions > 0) then return false end
+
+    local craterPos = CFrame.new(-5245.80, 52.10, 8480.20)
+    toTarget(craterPos, 5)
+    EquipWeapon()
+    task.wait(1)
+
+    local enemies = Workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, mob in ipairs(enemies:GetChildren()) do
+            if (mob.Name:find("Lava") or mob.Name:find("Slime")) and IsMobAlive(mob) then
+                local mRoot = mob:FindFirstChild("HumanoidRootPart")
+                if mRoot then
+                    toTarget(GetFarmCFrame(mRoot), 5)
+                    BringMob(mob)
+                    EquipWeapon()
+                    return true
+                end
+            end
+        end
+    end
+
+    SecretQuests.ClaimReward("The Mayor")
+    return true
+end
+
+-- 7. Master Bonus Moments Stepper
+function SecretQuests.DoBonusMoments()
+    if Data.GetSea and Data.GetSea() ~= 1 then return false end
+
+    if SecretQuests.DoEscapeFromAlcatraz() then return true end
+    if SecretQuests.DoDonMegalo() then return true end
+    if SecretQuests.DoBananaTree() then return true end
+    if SecretQuests.DoArchaeologistTablet() then return true end
+    if SecretQuests.DoBreakingTheIce() then return true end
+    if SecretQuests.DoEvilSlimes() then return true end
+
+    return false
+end
+
+-- ====================================================================
 -- MASTER ENDGAME QUEST STEPPER
 -- Runs each quest in optimal progression priority
 -- ====================================================================
 function SecretQuests.Step()
     AutoBuyHaki()
 
-    -- Sea 1 Quests
+    -- Sea 1 Quests & Bonus Moments
+    if SecretQuests.DoBonusMoments() then return true end
     if SecretQuests.DoSaber() then return true end
 
     -- Sea 3 Quests & Bosses
@@ -2911,10 +3456,10 @@ task.spawn(function()
                 end
             end
 
-            -- Endgame Secret Quests (Yama, Tushita, CDK, Soul Guitar in Sea 3)
-            if currentSea == 3 and SecretQuests and SecretQuests.Step then
+            -- Secret Quests & Bonus Moments Engine (All Seas: Bonus Moments & Saber in Sea 1, Rare Items in Sea 2, CDK/Soul Guitar in Sea 3)
+            if SecretQuests and SecretQuests.Step then
                 if SecretQuests.Step() then
-                    HUDStatus = "Secret Endgame Quest Active (CDK/Soul Guitar)"
+                    HUDStatus = "Secret Quest / Bonus Moment Active"
                     return
                 end
             end
@@ -2948,25 +3493,65 @@ task.spawn(function()
                 end
             else
                 HUDStatus = string.format("Farming %s (Lv %d)", quest.Mob, quest.Min or 1)
+                EquipWeapon()
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
                 if enemies then
+                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local refPos = (hrp and hrp.Position) or quest.PosM.Position
+                    local bestExactDist, bestPrefDist = math.huge, math.huge
+                    local exactMob, prefMob = nil, nil
                     for _, mob in ipairs(enemies:GetChildren()) do
-                        if (mob.Name == quest.Mob or (mob.Name:find(quest.Mob) and not mob.Name:find("Escap"))) and IsMobAlive(mob) then
-                            targetMob = mob
-                            break
+                        if IsMobAlive(mob) then
+                            local mRoot = mob:FindFirstChild("HumanoidRootPart")
+                            local dist = mRoot and (mRoot.Position - refPos).Magnitude or math.huge
+                            if mob.Name == quest.Mob then
+                                if dist < bestExactDist then
+                                    bestExactDist = dist
+                                    exactMob = mob
+                                end
+                            elseif mob.Name:sub(1, #quest.Mob) == quest.Mob and not mob.Name:find("Escap") then
+                                if dist < bestPrefDist then
+                                    bestPrefDist = dist
+                                    prefMob = mob
+                                end
+                            end
                         end
                     end
+                    targetMob = exactMob or prefMob
                 end
 
                 if targetMob then
                     local mobHRP = targetMob:FindFirstChild("HumanoidRootPart")
                     if mobHRP then
                         local isPrisoner = (targetMob.Name == "Prisoner" or targetMob.Name == "Dangerous Prisoner" or targetMob.Name:find("Prisoner"))
+                        local isEscapedPrisoner = targetMob.Name:find("Escap") or targetMob.Name:find("Puncher") or (targetMob:FindFirstChildWhichIsA("ProximityPrompt", true) ~= nil)
+                        if isEscapedPrisoner and not targetMob:GetAttribute("Confronted") then
+                            pcall(function()
+                                local prompt = targetMob:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                if prompt and type(fireproximityprompt) == "function" then
+                                    fireproximityprompt(prompt, 0)
+                                end
+                                if comm then
+                                    comm:InvokeServer("TalkToNPC", targetMob.Name)
+                                    comm:InvokeServer("TalkToNPC", targetMob)
+                                end
+                                local dc = ReplicatedStorage:FindFirstChild("DialogueController")
+                                if dc then
+                                    local ok, mod = pcall(require, dc)
+                                    if ok and mod and mod.select then
+                                        for _, opt in ipairs({ "Not this time", "Not this", "No thanks", "No", "Decline" }) do
+                                            pcall(mod.select, opt)
+                                        end
+                                        if mod.close then pcall(mod.close) end
+                                    end
+                                end
+                                targetMob:SetAttribute("Confronted", true)
+                            end)
+                        end
+                        BringMob(targetMob)
                         local farmCF = isPrisoner and (mobHRP.CFrame * CFrame.new(0, 3, -4)) or GetFarmCFrame(mobHRP)
                         toTarget(farmCF, 5)
-                        BringMob(targetMob)
-                        EquipWeapon()
                     end
                 else
                     toTarget(quest.PosM, 15)
