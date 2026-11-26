@@ -757,7 +757,7 @@ local function B(hrp, goalCF, targetSpeed, snapThreshold)
         end
     end
 
-    TweenManager.CancelTweenOnly()
+    TweenManager.CancelTweenOnly(true)
     if activeCoroutine and coroutine.status(activeCoroutine) == "suspended" then
         pcall(coroutine.close, activeCoroutine)
     end
@@ -1564,9 +1564,19 @@ local function PressKey(key)
     end)
 end
 
-local function HasActiveQuest()
+local function CollectVisibleGuiText(rootGui)
+    local parts = {}
+    for _, obj in ipairs(rootGui:GetDescendants()) do
+        if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Visible and obj.Text and obj.Text ~= "" then
+            table.insert(parts, obj.Text)
+        end
+    end
+    return table.concat(parts, " ")
+end
+
+local function GetActiveQuestState()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not pgui then return false end
+    if not pgui then return false, nil end
 
     -- 1. Check TrackedQuestFrame (supports both ScreenGui.Enabled and Frame.Visible)
     local tqf = pgui:FindFirstChild("TrackedQuestFrame")
@@ -1574,7 +1584,7 @@ local function HasActiveQuest()
         local tqfActive = (tqf:IsA("LayerCollector") and tqf.Enabled) or (tqf:IsA("GuiObject") and tqf.Visible)
         local inner = tqf:FindFirstChild("Frame")
         if tqfActive and (not inner or inner.Visible) then
-            return true
+            return true, CollectVisibleGuiText(inner or tqf)
         end
     end
 
@@ -1589,16 +1599,21 @@ local function HasActiveQuest()
                     local questTitle = container:FindFirstChild("QuestTitle")
                     local title = questTitle and questTitle:FindFirstChild("Title")
                     if title and title.Text and title.Text ~= "" and title.Text ~= "QUEST" then
-                        return true
+                        return true, title.Text
                     end
                 else
-                    return true
+                    return true, CollectVisibleGuiText(qFrame)
                 end
             end
         end
     end
 
-    return false
+    return false, nil
+end
+
+local function HasActiveQuest()
+    local active = GetActiveQuestState()
+    return active
 end
 
 -- ====================================================================
@@ -3448,12 +3463,19 @@ local SpawnPatrolIdx = 1
 local SpawnPatrolAt = 0
 
 local function FindMobSpawnWaitCF(mobName, fallbackPosM)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local baseWaitCF = CFrame.new(fallbackPosM.Position + Vector3.new(0, 25, 0))
+    if hrp and (hrp.Position - fallbackPosM.Position).Magnitude > 300 then
+        return baseWaitCF
+    end
+
     local spawns = {}
     local worldOrigin = Workspace:FindFirstChild("_WorldOrigin")
     local enemySpawns = worldOrigin and worldOrigin:FindFirstChild("EnemySpawns")
     if enemySpawns and mobName then
         for _, sp in ipairs(enemySpawns:GetChildren()) do
-            if sp.Name:sub(1, #mobName) == mobName then
+            if sp.Name == mobName or sp.Name:sub(1, #mobName + 2) == (mobName .. " [") then
                 local pos = sp:IsA("BasePart") and sp.Position or (sp:IsA("Model") and sp:GetPivot().Position)
                 if pos then
                     table.insert(spawns, pos)
@@ -3469,7 +3491,7 @@ local function FindMobSpawnWaitCF(mobName, fallbackPosM)
         local idx = ((SpawnPatrolIdx - 1) % #spawns) + 1
         return CFrame.new(spawns[idx] + Vector3.new(0, 25, 0))
     end
-    return CFrame.new(fallbackPosM.Position + Vector3.new(0, 25, 0))
+    return baseWaitCF
 end
 
 task.spawn(function()
@@ -3544,8 +3566,22 @@ task.spawn(function()
             local quest = Data.GetQuest(level)
             if not quest then return end
 
-            if not HasActiveQuest() then
-                HUDStatus = string.format("Accepting Quest: %s", quest.Quest)
+            local hasQuest, questTitle = GetActiveQuestState()
+
+            -- Abandon outdated quests (e.g., Monkey/Gorilla quest active after leveling to 30+ Pirate)
+            if hasQuest and questTitle and questTitle ~= "" and comm then
+                local normTitle = questTitle:gsub("Military ", "Mil. "):lower()
+                local normMob = quest.Mob:gsub("Military ", "Mil. "):lower()
+                if not normTitle:find(normMob, 1, true) then
+                    HUDStatus = string.format("Switching Quest -> %s (Lv %d)", quest.Mob, level)
+                    comm:InvokeServer("AbandonQuest")
+                    task.wait(0.35)
+                    return
+                end
+            end
+
+            if not hasQuest then
+                HUDStatus = string.format("Accepting Quest: %s (%s)", quest.Quest, quest.Mob)
                 local targetQ = quest.PosQ
                 pcall(function()
                     local npcs = Workspace:FindFirstChild("NPCs")
@@ -3583,7 +3619,7 @@ task.spawn(function()
                         if IsMobAlive(mob) then
                             local mRoot = mob:FindFirstChild("HumanoidRootPart")
                             local dist = mRoot and (mRoot.Position - refPos).Magnitude or math.huge
-                            local isMatch = (mob.Name == quest.Mob) or (mob.Name:sub(1, #quest.Mob) == quest.Mob and not mob.Name:find("Escap"))
+                            local isMatch = (mob.Name == quest.Mob) or (mob.Name:sub(1, #quest.Mob + 2) == (quest.Mob .. " [") and not mob.Name:find("Escap"))
                             if isMatch then
                                 local ignoreUntil = mob:GetAttribute("IgnoreTargetUntil") or 0
                                 if now < ignoreUntil then
