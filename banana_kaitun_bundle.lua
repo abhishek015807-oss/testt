@@ -2714,19 +2714,20 @@ local function ExtractNPCCFrame(inst)
         end
         return nil
     end)
-    return ok and cf or nil
+    if ok and cf and cf.Position.Magnitude > 50 then
+        return cf
+    end
+    return nil
 end
 
 local function FindStyleTeacherCF(style, sea)
     if not style then return nil end
     local npcNames = style.NPCs or {}
-    for _, container in ipairs({ Workspace:FindFirstChild("NPCs"), ReplicatedStorage:FindFirstChild("NPCs") }) do
-        if container then
-            for _, npcName in ipairs(npcNames) do
-                local npc = container:FindFirstChild(npcName)
-                local cf = ExtractNPCCFrame(npc)
-                if cf then return cf end
-            end
+    local wsNPCs = Workspace:FindFirstChild("NPCs")
+    if wsNPCs then
+        for _, npcName in ipairs(npcNames) do
+            local cf = ExtractNPCCFrame(wsNPCs:FindFirstChild(npcName))
+            if cf then return cf end
         end
     end
     local okNM, nm = pcall(function()
@@ -2740,6 +2741,13 @@ local function FindStyleTeacherCF(style, sea)
                 local cf = ExtractNPCCFrame(list[1]._modelState._instance)
                 if cf then return cf end
             end
+        end
+    end
+    local rsNPCs = ReplicatedStorage:FindFirstChild("NPCs")
+    if rsNPCs then
+        for _, npcName in ipairs(npcNames) do
+            local cf = ExtractNPCCFrame(rsNPCs:FindFirstChild(npcName))
+            if cf then return cf end
         end
     end
     return style.Fallbacks and style.Fallbacks[sea] or nil
@@ -2915,7 +2923,7 @@ local function StepMeleeBuy()
         return false
     end
 
-    if (tick() - pending.StartedAt) > 25 then
+    if (tick() - pending.StartedAt) > 110 then
         MeleeProgression.Cooldowns[style.Id] = tick() + 120
         MeleeProgression.Pending = nil
         return false
@@ -2937,20 +2945,40 @@ local function StepMeleeBuy()
         return false
     end
 
-    local teacherName = (style.NPCs and style.NPCs[1]) or (style.Display .. " Teacher")
-    HUDStatus = "Buying Style: " .. style.Display .. " 🥋"
-    HUDSubStatus = "Travelling to " .. teacherName
-
-    toTarget(npcCF * CFrame.new(0, 3, 4), 5)
-
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp and (hrp.Position - npcCF.Position).Magnitude <= 16 and (tick() - pending.LastBuyAt) >= 0.7 then
+    local dist = hrp and (hrp.Position - npcCF.Position).Magnitude or 99999
+
+    -- Only abort mid-flight if stuck with no distance progress for 25s (allows long cross-island flights >25s)
+    pending.BestDist = pending.BestDist or dist
+    pending.LastProgressAt = pending.LastProgressAt or tick()
+    if dist <= 25 or dist < (pending.BestDist - 15) then
+        pending.BestDist = math.min(pending.BestDist, dist)
+        pending.LastProgressAt = tick()
+    elseif (tick() - pending.LastProgressAt) > 25 then
+        MeleeProgression.Cooldowns[style.Id] = tick() + 60
+        MeleeProgression.Pending = nil
+        return false
+    end
+
+    local teacherName = (style.NPCs and style.NPCs[1]) or (style.Display .. " Teacher")
+    HUDStatus = "Buying Style: " .. style.Display .. " 🥋"
+    HUDSubStatus = string.format("Travelling to %s (%dm)", teacherName, math.floor(dist))
+
+    local standCF = npcCF * CFrame.new(0, 2, 3)
+    toTarget(standCF, 4, 350)
+
+    -- Refresh hrp/dist after toTarget in case snap teleport occurred immediately
+    char = LocalPlayer.Character
+    hrp = char and char:FindFirstChild("HumanoidRootPart")
+    dist = hrp and (hrp.Position - npcCF.Position).Magnitude or 99999
+
+    if dist <= 12 and (tick() - pending.LastBuyAt) >= 0.65 then
         pending.LastBuyAt = tick()
         pending.Attempts = pending.Attempts + 1
         HUDSubStatus = "Talking to " .. teacherName .. "..."
         InvokeStylePurchase(comm, style)
-        task.wait(0.25)
+        task.wait(0.4)
 
         local afterId, afterName, afterMas = GetHeldMeleeInfo()
         if afterId == style.Id then
@@ -2960,7 +2988,7 @@ local function StepMeleeBuy()
             RefreshMeleeHUDStatus(afterId, afterName, afterMas, beli)
             EquipWeapon()
             return true
-        elseif pending.Attempts >= 4 then
+        elseif pending.Attempts >= 6 then
             -- Style locked by external prereq/key (e.g. Electro lightning / Sharkman key); back off cleanly
             MeleeProgression.Cooldowns[style.Id] = tick() + 120
             MeleeProgression.Pending = nil
