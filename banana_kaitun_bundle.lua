@@ -1789,10 +1789,10 @@ local function CollectVisibleGuiText(rootGui)
     return table.concat(parts, " ")
 end
 
-local GuideCache = { Mod = nil, Tried = false }
+local GuideCache = { Mod = nil, LastTry = 0 }
 local function GetGuideData()
-    if not GuideCache.Tried then
-        GuideCache.Tried = true
+    if not GuideCache.Mod and (tick() - GuideCache.LastTry) >= 5 then
+        GuideCache.LastTry = tick()
         pcall(function()
             local gm = ReplicatedStorage:FindFirstChild("GuideModule")
             if gm and typeof(require) == "function" then
@@ -1825,26 +1825,43 @@ local function GetLiveQuestNPCCF(questName, questLevel)
 end
 
 local function GetActiveQuestState()
-    -- 0. Prefer GuideModule.Data.QuestData directly from game state (no plural/UI quirks)
+    -- 0. Check GuideModule.Data.QuestData (new reworked islands & unified server state)
     local gd = GetGuideData()
     local qData = gd and gd.QuestData
-    if type(qData) == "table" and type(qData.Task) == "table" then
-        local mobKey, rem = next(qData.Task)
-        if mobKey and (tonumber(rem) or 0) > 0 then
-            return true, tostring(mobKey)
+    if type(qData) == "table" then
+        if type(qData.Task) == "table" then
+            local mobKey = next(qData.Task)
+            if mobKey ~= nil then
+                return true, tostring(mobKey)
+            end
+        end
+        if qData.Name and qData.Name ~= "" then
+            return true, tostring(qData.Name)
         end
     end
 
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     if not pgui then return false, nil end
 
-    -- 1. Check TrackedQuestFrame (supports both ScreenGui.Enabled and Frame.Visible)
+    -- 1. Check TrackedQuestFrame (reworked islands UI: header / description / visible text)
     local tqf = pgui:FindFirstChild("TrackedQuestFrame")
     if tqf then
         local tqfActive = (tqf:IsA("LayerCollector") and tqf.Enabled) or (tqf:IsA("GuiObject") and tqf.Visible)
         local inner = tqf:FindFirstChild("Frame")
         if tqfActive and (not inner or inner.Visible) then
-            local txt = CollectVisibleGuiText(inner or tqf)
+            local frame = inner or tqf
+            local descLabel = frame:FindFirstChild("description")
+            local headerContainer = frame:FindFirstChild("header")
+            local headerLabel = headerContainer and headerContainer:FindFirstChild("textLabel")
+            local innerHeader = headerLabel and headerLabel:FindFirstChild("textLabel")
+            local headerTxt = (innerHeader and innerHeader.Text) or (headerLabel and headerLabel.Text)
+            local descTxt = (descLabel and descLabel.Text ~= "" and descLabel.Text) or nil
+            if descTxt and descTxt:upper() ~= "QUEST" then
+                return true, descTxt
+            elseif headerTxt and headerTxt ~= "" and headerTxt:upper() ~= "QUEST" then
+                return true, headerTxt
+            end
+            local txt = CollectVisibleGuiText(frame)
             local cleanTxt = txt:gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
             if cleanTxt ~= "" and cleanTxt:upper() ~= "QUEST" then
                 return true, cleanTxt
@@ -1852,7 +1869,7 @@ local function GetActiveQuestState()
         end
     end
 
-    -- 2. Check BOTH Main and Main (minimal) Quest UIs (never stop on Main if inactive)
+    -- 2. Check Old Quest UI in Main & Main (minimal) (e.g. Marine Fortress Lv 120+)
     for _, guiName in ipairs({ "Main", "Main (minimal)" }) do
         local gui = pgui:FindFirstChild(guiName)
         if gui then
@@ -1862,12 +1879,22 @@ local function GetActiveQuestState()
                 if container then
                     local questTitle = container:FindFirstChild("QuestTitle")
                     local title = questTitle and questTitle:FindFirstChild("Title")
-                    if title and title.Text and title.Text ~= "" and title.Text ~= "QUEST" then
+                    if title and title.Text and title.Text ~= "" and title.Text:upper() ~= "QUEST" then
                         return true, title.Text
                     end
-                else
-                    return true, CollectVisibleGuiText(qFrame)
                 end
+                local fallbackTxt = CollectVisibleGuiText(qFrame):gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+                if fallbackTxt ~= "" and fallbackTxt:upper() ~= "QUEST" then
+                    return true, fallbackTxt
+                end
+                -- Old UI Quest frame is visibly active even if nested labels are hidden/non-standard
+                local rawParts = {}
+                for _, obj in ipairs(qFrame:GetDescendants()) do
+                    if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text and obj.Text ~= "" and obj.Text:upper() ~= "QUEST" then
+                        table.insert(rawParts, obj.Text)
+                    end
+                end
+                return true, table.concat(rawParts, " ")
             end
         end
     end
@@ -3955,11 +3982,11 @@ task.spawn(function()
 
             local hasQuest, questTitle = GetActiveQuestState()
 
-            -- Abandon outdated quests (normalized to avoid pluralization mismatches like Mil. Spies, Snowmen, Thieves)
-            if hasQuest and questTitle and questTitle ~= "" and comm then
-                local normTitle = NormalizeQuestText(questTitle)
+            -- Abandon outdated quests (only when title has real objective text, never on blank/"QUEST" placeholder)
+            if hasQuest and questTitle then
+                local normTitle = NormalizeQuestText(questTitle):gsub("^%s*(.-)%s*$", "%1")
                 local normMob = NormalizeQuestText(quest.Mob)
-                if not normTitle:find(normMob, 1, true) then
+                if normTitle ~= "" and normTitle ~= "quest" and #normTitle >= 4 and not normTitle:find(normMob, 1, true) then
                     HUDStatus = string.format("Switching Quest -> %s (Lv %d)", quest.Mob, level)
                     comm:InvokeServer("AbandonQuest")
                     task.wait(0.35)
@@ -3976,7 +4003,7 @@ task.spawn(function()
                     local npcs = Workspace:FindFirstChild("NPCs")
                     if npcs then
                         for _, npc in ipairs(npcs:GetChildren()) do
-                            if npc:IsA("Model") and (npc.Name:find("Quest") or npc.Name:find(quest.Quest)) then
+                            if npc:IsA("Model") and (npc.Name:find("Quest") or npc.Name:find(quest.Quest) or npc.Name == "Marine Leader") then
                                 local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Head")
                                 if root and (root.Position - livePosQ.Position).Magnitude <= 120 then
                                     targetQ = root.CFrame
@@ -3991,6 +4018,7 @@ task.spawn(function()
                 if hrp and (hrp.Position - targetQ.Position).Magnitude <= 20 and comm then
                     comm:InvokeServer("StartQuest", quest.Quest, quest.Id)
                     task.wait(0.35)
+                    return
                 end
             else
                 EquipWeapon()
