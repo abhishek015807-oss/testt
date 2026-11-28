@@ -1824,19 +1824,55 @@ local function GetLiveQuestNPCCF(questName, questLevel)
     return nil
 end
 
-local function GetActiveQuestState()
-    -- 0. Check GuideModule.Data.QuestData (new reworked islands & unified server state)
-    local gd = GetGuideData()
-    local qData = gd and gd.QuestData
-    if type(qData) == "table" then
-        if type(qData.Task) == "table" then
-            local mobKey = next(qData.Task)
-            if mobKey ~= nil then
-                return true, tostring(mobKey)
+local function CloseQuestDialogue()
+    pcall(function()
+        local dc = ReplicatedStorage:FindFirstChild("DialogueController")
+        if dc and typeof(require) == "function" then
+            local ok, mod = pcall(require, dc)
+            if ok and mod and mod.close then
+                pcall(mod.close)
             end
         end
-        if qData.Name and qData.Name ~= "" then
-            return true, tostring(qData.Name)
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not pgui then return end
+        for _, guiName in ipairs({ "Main", "Main (minimal)" }) do
+            local gui = pgui:FindFirstChild(guiName)
+            local dlg = gui and gui:FindFirstChild("Dialogue", true)
+            if dlg and dlg:IsA("GuiObject") and dlg.Visible then
+                for _, child in ipairs(dlg:GetDescendants()) do
+                    if child:IsA("TextButton") and child.Visible then
+                        local txt = (child.Text or ""):lower()
+                        if txt:find("nevermind", 1, true) or txt:find("cancel", 1, true) or child.Name == "Cancel" or child.Name == "Option3" then
+                            if typeof(getconnections) == "function" then
+                                for _, sig in ipairs({ child.Activated, child.MouseButton1Click }) do
+                                    for _, conn in ipairs(getconnections(sig)) do
+                                        pcall(function() conn:Fire() end)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                dlg.Visible = false
+                local ch = LocalPlayer.Character
+                local hrpNow = ch and ch:FindFirstChild("HumanoidRootPart")
+                local humNow = ch and ch:FindFirstChildOfClass("Humanoid")
+                if hrpNow and hrpNow.Anchored and (not humNow or not humNow.Sit) then
+                    hrpNow.Anchored = false
+                end
+            end
+        end
+    end)
+end
+
+local function GetActiveQuestState()
+    -- 0. Check GuideModule.Data.QuestData.Task (new reworked islands & unified server state)
+    local gd = GetGuideData()
+    local qData = gd and gd.QuestData
+    if type(qData) == "table" and type(qData.Task) == "table" then
+        local mobKey = next(qData.Task)
+        if mobKey ~= nil then
+            return true, tostring(mobKey)
         end
     end
 
@@ -1869,12 +1905,12 @@ local function GetActiveQuestState()
         end
     end
 
-    -- 2. Check Old Quest UI in Main & Main (minimal) (e.g. Marine Fortress Lv 120+)
+    -- 2. Check Old Quest UI in Main & Main (minimal) (supports nested Quest frames on v30+)
     for _, guiName in ipairs({ "Main", "Main (minimal)" }) do
         local gui = pgui:FindFirstChild(guiName)
         if gui then
-            local qFrame = gui:FindFirstChild("Quest")
-            if qFrame and qFrame.Visible then
+            local qFrame = gui:FindFirstChild("Quest") or gui:FindFirstChild("Quest", true)
+            if qFrame and qFrame:IsA("GuiObject") and qFrame.Visible then
                 local container = qFrame:FindFirstChild("Container")
                 if container then
                     local questTitle = container:FindFirstChild("QuestTitle")
@@ -1887,7 +1923,6 @@ local function GetActiveQuestState()
                 if fallbackTxt ~= "" and fallbackTxt:upper() ~= "QUEST" then
                     return true, fallbackTxt
                 end
-                -- Old UI Quest frame is visibly active even if nested labels are hidden/non-standard
                 local rawParts = {}
                 for _, obj in ipairs(qFrame:GetDescendants()) do
                     if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text and obj.Text ~= "" and obj.Text:upper() ~= "QUEST" then
@@ -1895,6 +1930,16 @@ local function GetActiveQuestState()
                     end
                 end
                 return true, table.concat(rawParts, " ")
+            end
+
+            -- 3. Fallback: scan visible Defeat/Quest objective label directly (excludes Dialogue prompts)
+            local dlg = gui:FindFirstChild("Dialogue", true)
+            for _, obj in ipairs(gui:GetDescendants()) do
+                if obj:IsA("TextLabel") and obj.Visible and obj.Text and (not dlg or not obj:IsDescendantOf(dlg)) then
+                    if obj.Text:match("[Dd]efeat%s+%d+") or obj.Text:match("[Dd]efeat%s+.-%(%d+/%d+%)") then
+                        return true, obj.Text
+                    end
+                end
             end
         end
     end
@@ -3982,11 +4027,15 @@ task.spawn(function()
 
             local hasQuest, questTitle = GetActiveQuestState()
 
-            -- Abandon outdated quests (only when title has real objective text, never on blank/"QUEST" placeholder)
+            -- Abandon outdated quests (only when title has real objective text matching neither Mob nor Quest)
             if hasQuest and questTitle then
                 local normTitle = NormalizeQuestText(questTitle):gsub("^%s*(.-)%s*$", "%1")
                 local normMob = NormalizeQuestText(quest.Mob)
-                if normTitle ~= "" and normTitle ~= "quest" and #normTitle >= 4 and not normTitle:find(normMob, 1, true) then
+                local normQuestName = quest.Quest:lower()
+                if normTitle ~= "" and normTitle ~= "quest" and #normTitle >= 4
+                    and not normTitle:find(normMob, 1, true)
+                    and not normTitle:find(normQuestName, 1, true)
+                then
                     HUDStatus = string.format("Switching Quest -> %s (Lv %d)", quest.Mob, level)
                     comm:InvokeServer("AbandonQuest")
                     task.wait(0.35)
@@ -4013,14 +4062,18 @@ task.spawn(function()
                         end
                     end
                 end)
-                toTarget(targetQ, 8)
+                -- Hover slightly above the NPC ring to invoke StartQuest without triggering old Dialogue UI
+                local approachQ = CFrame.new(targetQ.Position + Vector3.new(0, 10, 4))
+                toTarget(approachQ, 8)
                 local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 20 and comm then
+                if hrp and (hrp.Position - targetQ.Position).Magnitude <= 22 and comm then
                     comm:InvokeServer("StartQuest", quest.Quest, quest.Id)
+                    CloseQuestDialogue()
                     task.wait(0.35)
                     return
                 end
             else
+                CloseQuestDialogue()
                 EquipWeapon()
                 local targetMob = nil
                 local enemies = Workspace:FindFirstChild("Enemies")
