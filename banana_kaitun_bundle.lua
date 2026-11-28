@@ -425,6 +425,10 @@ local function GetCommF()
 end
 CommF = GetCommF()
 
+local HUDStatus = "Starting up..."
+local HUDSubStatus = "Style: Checking..."
+local UI_Visible = true
+
 local RegisterAttackRemote = nil
 local RegisterHitRemote = nil
 local CombatNet = {
@@ -2586,8 +2590,10 @@ end
 -- ====================================================================
 local MeleeProgression = {
     LastCheckAt = 0,
+    LastRemoteTry = {},
     Mastery = {},
     Cooldowns = {},
+    Pending = nil,
 }
 
 local MELEE_ALIAS = {
@@ -2612,18 +2618,132 @@ local MELEE_ALIAS = {
 }
 
 local MELEE_ORDER = {
-    { Id = "BlackLeg",       Display = "Dark Step",       Remote = "BuyBlackLeg",       Beli = 150000,  Frags = 0,    SeaMin = 1, TargetMas = 400 },
-    { Id = "Electro",        Display = "Electric",        Remote = "BuyElectro",        Beli = 500000,  Frags = 0,    SeaMin = 1, TargetMas = 400 },
-    { Id = "FishmanKarate",  Display = "Water Kung Fu",   Remote = "BuyFishmanKarate",  Beli = 750000,  Frags = 0,    SeaMin = 1, TargetMas = 400 },
-    { Id = "DragonClaw",     Display = "Dragon Breath",   Remote = nil,                 Beli = 0,       Frags = 1500, SeaMin = 2, TargetMas = 400,
-      BuyArgs = { "BlackbeardReward", "DragonClaw", "2" }, CheckArgs = { "BlackbeardReward", "DragonClaw", "1" } },
-    { Id = "Superhuman",     Display = "Superhuman",      Remote = "BuySuperhuman",     Beli = 3000000, Frags = 0,    SeaMin = 2, TargetMas = 400 },
-    { Id = "DeathStep",      Display = "Death Step",      Remote = "BuyDeathStep",      Beli = 2500000, Frags = 5000, SeaMin = 2, TargetMas = 400, Req400 = "BlackLeg" },
-    { Id = "SharkmanKarate", Display = "Sharkman Karate", Remote = "BuySharkmanKarate", Beli = 2500000, Frags = 5000, SeaMin = 2, TargetMas = 400, Req400 = "FishmanKarate" },
-    { Id = "ElectricClaw",   Display = "Electric Claw",   Remote = "BuyElectricClaw",   Beli = 3000000, Frags = 5000, SeaMin = 3, TargetMas = 400, Req400 = "Electro" },
-    { Id = "DragonTalon",    Display = "Dragon Talon",    Remote = "BuyDragonTalon",    Beli = 3000000, Frags = 5000, SeaMin = 3, TargetMas = 400, Req400 = "DragonClaw" },
-    { Id = "Godhuman",       Display = "Godhuman",        Remote = "BuyGodhuman",       Beli = 5000000, Frags = 5000, SeaMin = 3, TargetMas = 600 },
+    {
+        Id = "BlackLeg", Display = "Dark Step", Remote = "BuyBlackLeg",
+        Beli = 150000, Frags = 0, SeaMin = 1, TargetMas = 400,
+        NPCs = { "Dark Step Teacher", "Black Leg Teacher" },
+        Fallbacks = {
+            [1] = CFrame.new(-985, 13, 3988),
+            [2] = CFrame.new(-4753, 35, -4850),
+            [3] = CFrame.new(-5045, 371, -3181),
+        },
+    },
+    {
+        Id = "Electro", Display = "Electric", Remote = "BuyElectro",
+        Beli = 500000, Frags = 0, SeaMin = 1, TargetMas = 400,
+        NPCs = { "Mad Scientist" },
+        Fallbacks = {
+            [1] = CFrame.new(-4607.82, 872.54, -1667.56),
+            [2] = CFrame.new(-4867, 35, -4766),
+            [3] = CFrame.new(-4995, 314, -3203),
+        },
+    },
+    {
+        Id = "FishmanKarate", Display = "Water Kung Fu", Remote = "BuyFishmanKarate",
+        Beli = 750000, Frags = 0, SeaMin = 1, TargetMas = 400,
+        NPCs = { "Water Kung-fu Teacher", "Water Kung Fu Teacher" },
+        Fallbacks = {
+            [1] = CFrame.new(61585, 18, 987),
+            [2] = CFrame.new(-4958, 35, -4668),
+            [3] = CFrame.new(-5023, 371, -3190),
+        },
+    },
+    {
+        Id = "DragonClaw", Display = "Dragon Breath", Remote = nil,
+        Beli = 0, Frags = 1500, SeaMin = 2, TargetMas = 400,
+        BuyArgs = { "BlackbeardReward", "DragonClaw", "2" },
+        CheckArgs = { "BlackbeardReward", "DragonClaw", "1" },
+        NPCs = { "Sabi" },
+        Fallbacks = {
+            [2] = CFrame.new(701, 187, 655),
+            [3] = CFrame.new(-4981, 371, -3207),
+        },
+    },
+    {
+        Id = "Superhuman", Display = "Superhuman", Remote = "BuySuperhuman",
+        Beli = 3000000, Frags = 0, SeaMin = 2, TargetMas = 400,
+        NPCs = { "Martial Arts Master" },
+        Fallbacks = {},
+    },
+    {
+        Id = "DeathStep", Display = "Death Step", Remote = "BuyDeathStep",
+        Beli = 2500000, Frags = 5000, SeaMin = 2, TargetMas = 400, Req400 = "BlackLeg",
+        NPCs = { "Phoeyu, the Reformed" },
+        Fallbacks = {
+            [2] = CFrame.new(6357, 296, -6762),
+            [3] = CFrame.new(-4999, 314, -3221),
+        },
+    },
+    {
+        Id = "SharkmanKarate", Display = "Sharkman Karate", Remote = "BuySharkmanKarate",
+        Beli = 2500000, Frags = 5000, SeaMin = 2, TargetMas = 400, Req400 = "FishmanKarate",
+        NPCs = { "Sharkman Teacher" },
+        Fallbacks = {
+            [2] = CFrame.new(-2602, 238, -10316),
+            [3] = CFrame.new(-4972, 314, -3222),
+        },
+    },
+    {
+        Id = "ElectricClaw", Display = "Electric Claw", Remote = "BuyElectricClaw",
+        Beli = 3000000, Frags = 5000, SeaMin = 3, TargetMas = 400, Req400 = "Electro",
+        NPCs = { "Previous Hero" },
+        Fallbacks = { [3] = CFrame.new(-10371.62, 331.30, -10131.62) },
+    },
+    {
+        Id = "DragonTalon", Display = "Dragon Talon", Remote = "BuyDragonTalon",
+        Beli = 3000000, Frags = 5000, SeaMin = 3, TargetMas = 400, Req400 = "DragonClaw",
+        NPCs = { "Uzoth" },
+        Fallbacks = { [3] = CFrame.new(5661, 1211, 865) },
+    },
+    {
+        Id = "Godhuman", Display = "Godhuman", Remote = "BuyGodhuman",
+        Beli = 5000000, Frags = 5000, SeaMin = 3, TargetMas = 600,
+        NPCs = { "Ancient Monk" },
+        Fallbacks = { [3] = CFrame.new(-13776, 334, -9879) },
+    },
 }
+
+local function ExtractNPCCFrame(inst)
+    if not inst then return nil end
+    local ok, cf = pcall(function()
+        if inst:IsA("Model") then
+            local hrp = inst:FindFirstChild("HumanoidRootPart")
+            return (hrp and hrp.CFrame) or inst:GetPivot()
+        elseif inst:IsA("BasePart") then
+            return inst.CFrame
+        end
+        return nil
+    end)
+    return ok and cf or nil
+end
+
+local function FindStyleTeacherCF(style, sea)
+    if not style then return nil end
+    local npcNames = style.NPCs or {}
+    for _, container in ipairs({ Workspace:FindFirstChild("NPCs"), ReplicatedStorage:FindFirstChild("NPCs") }) do
+        if container then
+            for _, npcName in ipairs(npcNames) do
+                local npc = container:FindFirstChild(npcName)
+                local cf = ExtractNPCCFrame(npc)
+                if cf then return cf end
+            end
+        end
+    end
+    local okNM, nm = pcall(function()
+        local mod = ReplicatedStorage:FindFirstChild("NPCManager")
+        return mod and require(mod) or nil
+    end)
+    if okNM and nm and type(nm.getNPCsByName) == "function" then
+        for _, npcName in ipairs(npcNames) do
+            local okList, list = pcall(function() return nm.getNPCsByName(npcName) end)
+            if okList and type(list) == "table" and list[1] and list[1]._modelState and list[1]._modelState._instance then
+                local cf = ExtractNPCCFrame(list[1]._modelState._instance)
+                if cf then return cf end
+            end
+        end
+    end
+    return style.Fallbacks and style.Fallbacks[sea] or nil
+end
 
 local function GetHeldMeleeInfo()
     local char = LocalPlayer.Character
@@ -2656,95 +2776,203 @@ local function CheckMeleeOwned(comm, style)
     end)
     if ok then
         if style.Id == "Godhuman" then
-            return res == 3
+            return (Data.GetSea() == 3) and (res == true or res == 1 or res == 2)
         end
         return (res == true or res == 1 or res == 2)
     end
     return false
 end
 
-local function AutoFightingStyle()
-    if (tick() - MeleeProgression.LastCheckAt) < 8 then return end
+local function InvokeStylePurchase(comm, style)
+    return pcall(function()
+        if style.CheckArgs and style.BuyArgs then
+            comm:InvokeServer(unpack(style.CheckArgs))
+            comm:InvokeServer(unpack(style.BuyArgs))
+        elseif style.BuyArgs then
+            comm:InvokeServer(unpack(style.BuyArgs))
+        elseif style.Remote then
+            comm:InvokeServer(style.Remote)
+        end
+    end)
+end
+
+local function RefreshMeleeHUDStatus(curId, curName, curMas, beli)
+    local targetMas = 400
+    for _, s in ipairs(MELEE_ORDER) do
+        if s.Id == curId then targetMas = s.TargetMas; break end
+    end
+    if curName then
+        if curId == "Combat" then
+            HUDSubStatus = string.format("Style: %s (Mas %d) -> Dark Step (%dk/150k)", curName, curMas, math.floor((beli or 0) / 1000))
+        else
+            HUDSubStatus = string.format("Style: %s (Mas %d/%d)", curName, curMas, targetMas)
+        end
+    end
+    return targetMas
+end
+
+local function EvaluateFightingStyle()
+    local curId, curName, curMas = GetHeldMeleeInfo()
+    if curId and curId ~= "Combat" then
+        MeleeProgression.Mastery[curId] = math.max(MeleeProgression.Mastery[curId] or 0, curMas)
+    end
+
+    local d = LocalPlayer:FindFirstChild("Data")
+    local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
+    local frags = d and d:FindFirstChild("Fragments") and d.Fragments.Value or 0
+    local sea = Data.GetSea()
+    local targetMas = RefreshMeleeHUDStatus(curId, curName, curMas, beli)
+
+    -- Keep real fighting style equipped until target Mastery (400) for Godhuman progression
+    if curId and curId ~= "Combat" and curMas < targetMas then
+        return false
+    end
+
+    if MeleeProgression.Pending then
+        return true
+    end
+
+    local throttleSec = (curId == "Combat" and beli >= 150000) and 2 or 6
+    if (tick() - MeleeProgression.LastCheckAt) < throttleSec then
+        return false
+    end
     MeleeProgression.LastCheckAt = tick()
 
-    task.spawn(function()
-        pcall(function()
-            local comm = GetCommF()
-            if not comm then return end
+    local comm = GetCommF()
+    if not comm then return false end
 
-            local curId, curName, curMas = GetHeldMeleeInfo()
-            if curId and curId ~= "Combat" then
-                MeleeProgression.Mastery[curId] = math.max(MeleeProgression.Mastery[curId] or 0, curMas)
-            end
-
-            local d = LocalPlayer:FindFirstChild("Data")
-            local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
-            local frags = d and d:FindFirstChild("Fragments") and d.Fragments.Value or 0
-            local sea = Data.GetSea()
-
-            -- Update live HUD sub-status line with current style & mastery
-            local targetMas = 400
-            for _, s in ipairs(MELEE_ORDER) do
-                if s.Id == curId then targetMas = s.TargetMas; break end
-            end
-            if curName then
-                if curId == "Combat" then
-                    HUDSubStatus = string.format("Style: %s (Mas %d) -> Next: Dark Step (150k Beli)", curName, curMas)
-                else
-                    HUDSubStatus = string.format("Style: %s (Mas %d/%d)", curName, curMas, targetMas)
+    local now = tick()
+    for _, style in ipairs(MELEE_ORDER) do
+        if sea >= style.SeaMin and now >= (MeleeProgression.Cooldowns[style.Id] or 0) then
+            local knownMas = MeleeProgression.Mastery[style.Id] or 0
+            if knownMas < style.TargetMas and curId ~= style.Id then
+                local reqOk = true
+                if style.Req400 and (MeleeProgression.Mastery[style.Req400] or 0) < 400 then
+                    reqOk = false
                 end
-            end
-
-            -- Hold current real style until it reaches target Mastery (400) for Godhuman progression
-            if curId and curId ~= "Combat" and curMas < targetMas then
-                return
-            end
-
-            local now = tick()
-            for _, style in ipairs(MELEE_ORDER) do
-                if sea >= style.SeaMin and now >= (MeleeProgression.Cooldowns[style.Id] or 0) then
-                    local knownMas = MeleeProgression.Mastery[style.Id] or 0
-                    if knownMas < style.TargetMas and curId ~= style.Id then
-                        local reqOk = true
-                        if style.Req400 and (MeleeProgression.Mastery[style.Req400] or 0) < 400 then
+                if style.Id == "Superhuman" then
+                    for _, v1Id in ipairs({ "BlackLeg", "Electro", "FishmanKarate", "DragonClaw" }) do
+                        if (MeleeProgression.Mastery[v1Id] or 0) < 300 then
                             reqOk = false
-                        end
-                        if style.Id == "Superhuman" then
-                            for _, v1Id in ipairs({ "BlackLeg", "Electro", "FishmanKarate", "DragonClaw" }) do
-                                if (MeleeProgression.Mastery[v1Id] or 0) < 300 then
-                                    reqOk = false
-                                    break
-                                end
-                            end
-                        end
-
-                        local isOwned = CheckMeleeOwned(comm, style)
-                        if reqOk and (isOwned or (beli >= style.Beli and frags >= style.Frags)) then
-                            local okBuy = pcall(function()
-                                if style.BuyArgs then
-                                    comm:InvokeServer(unpack(style.BuyArgs))
-                                elseif style.Remote then
-                                    comm:InvokeServer(style.Remote)
-                                end
-                            end)
-                            task.wait(0.25)
-                            local afterId, afterName, afterMas = GetHeldMeleeInfo()
-                            if afterId == style.Id then
-                                MeleeProgression.Mastery[afterId] = math.max(MeleeProgression.Mastery[afterId] or 0, afterMas)
-                                HUDStatus = string.format("Equipped Style: %s!", afterName or style.Display)
-                                HUDSubStatus = string.format("Style: %s (Mas %d/%d)", afterName or style.Display, afterMas, style.TargetMas)
-                                EquipWeapon()
-                                return
-                            else
-                                -- Back off styles gated by uncompleted side quests/keys (e.g. Electro lightning / Sharkman key)
-                                MeleeProgression.Cooldowns[style.Id] = tick() + (okBuy and 120 or 30)
-                            end
+                            break
                         end
                     end
                 end
+
+                local isOwned = CheckMeleeOwned(comm, style)
+                if reqOk and (isOwned or (beli >= style.Beli and frags >= style.Frags)) then
+                    -- Fast remote buy attempt first (works on re-equip/older places)
+                    if (now - (MeleeProgression.LastRemoteTry[style.Id] or 0)) >= 12 then
+                        MeleeProgression.LastRemoteTry[style.Id] = now
+                        InvokeStylePurchase(comm, style)
+                        task.wait(0.2)
+                        local afterId, afterName, afterMas = GetHeldMeleeInfo()
+                        if afterId == style.Id then
+                            MeleeProgression.Mastery[afterId] = math.max(MeleeProgression.Mastery[afterId] or 0, afterMas)
+                            HUDStatus = string.format("Equipped Style: %s!", afterName or style.Display)
+                            RefreshMeleeHUDStatus(afterId, afterName, afterMas, beli)
+                            EquipWeapon()
+                            return true
+                        end
+                    end
+
+                    -- Remote didn't grant tool (proximity to Teacher NPC required): preempt Master Loop to travel & buy
+                    local npcCF = FindStyleTeacherCF(style, sea)
+                    if npcCF then
+                        MeleeProgression.Pending = {
+                            Style = style,
+                            StartedAt = tick(),
+                            LastBuyAt = 0,
+                            Attempts = 0,
+                        }
+                        return true
+                    else
+                        MeleeProgression.Cooldowns[style.Id] = tick() + 60
+                    end
+                end
             end
-        end)
-    end)
+        end
+    end
+    return false
+end
+
+local function StepMeleeBuy()
+    EvaluateFightingStyle()
+
+    local pending = MeleeProgression.Pending
+    if not pending then return false end
+
+    local style = pending.Style
+    local comm = GetCommF()
+    local curId, curName, curMas = GetHeldMeleeInfo()
+
+    if curId == style.Id then
+        MeleeProgression.Mastery[curId] = math.max(MeleeProgression.Mastery[curId] or 0, curMas)
+        MeleeProgression.Pending = nil
+        EquipWeapon()
+        HUDStatus = string.format("Equipped Style: %s!", curName or style.Display)
+        RefreshMeleeHUDStatus(curId, curName, curMas, 0)
+        return false
+    end
+
+    if (tick() - pending.StartedAt) > 25 then
+        MeleeProgression.Cooldowns[style.Id] = tick() + 120
+        MeleeProgression.Pending = nil
+        return false
+    end
+
+    local d = LocalPlayer:FindFirstChild("Data")
+    local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
+    local frags = d and d:FindFirstChild("Fragments") and d.Fragments.Value or 0
+    if comm and not CheckMeleeOwned(comm, style) and (beli < style.Beli or frags < style.Frags) then
+        MeleeProgression.Pending = nil
+        return false
+    end
+
+    local sea = Data.GetSea()
+    local npcCF = FindStyleTeacherCF(style, sea)
+    if not npcCF or not comm then
+        MeleeProgression.Cooldowns[style.Id] = tick() + 60
+        MeleeProgression.Pending = nil
+        return false
+    end
+
+    local teacherName = (style.NPCs and style.NPCs[1]) or (style.Display .. " Teacher")
+    HUDStatus = "Buying Style: " .. style.Display .. " 🥋"
+    HUDSubStatus = "Travelling to " .. teacherName
+
+    toTarget(npcCF * CFrame.new(0, 3, 4), 5)
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and (hrp.Position - npcCF.Position).Magnitude <= 16 and (tick() - pending.LastBuyAt) >= 0.7 then
+        pending.LastBuyAt = tick()
+        pending.Attempts = pending.Attempts + 1
+        HUDSubStatus = "Talking to " .. teacherName .. "..."
+        InvokeStylePurchase(comm, style)
+        task.wait(0.25)
+
+        local afterId, afterName, afterMas = GetHeldMeleeInfo()
+        if afterId == style.Id then
+            MeleeProgression.Mastery[afterId] = math.max(MeleeProgression.Mastery[afterId] or 0, afterMas)
+            MeleeProgression.Pending = nil
+            HUDStatus = string.format("Bought & Equipped: %s!", afterName or style.Display)
+            RefreshMeleeHUDStatus(afterId, afterName, afterMas, beli)
+            EquipWeapon()
+            return true
+        elseif pending.Attempts >= 4 then
+            -- Style locked by external prereq/key (e.g. Electro lightning / Sharkman key); back off cleanly
+            MeleeProgression.Cooldowns[style.Id] = tick() + 120
+            MeleeProgression.Pending = nil
+            return false
+        end
+    end
+
+    return true
+end
+
+local function AutoFightingStyle()
+    EvaluateFightingStyle()
 end
 
 -- ====================================================================
@@ -3057,7 +3285,7 @@ function SecretQuests.DoGodhuman()
     if not SecretQuests.AutoGodhuman or not CommF or Data.GetSea() ~= 3 or HasItem("Godhuman") or HasItem("GodHuman") then return false end
     local monkCheck = nil
     pcall(function() monkCheck = CommF:InvokeServer("BuyGodhuman", true) end)
-    if monkCheck == 3 then return false end -- Already owned
+    if monkCheck == 1 or monkCheck == 2 or monkCheck == true then return false end -- Already owned
 
     local d = LocalPlayer:FindFirstChild("Data")
     local beli = d and d:FindFirstChild("Beli") and d.Beli.Value or 0
@@ -3471,7 +3699,6 @@ end
 -- ====================================================================
 function SecretQuests.Step()
     AutoBuyHaki()
-    AutoFightingStyle()
 
     -- Sea 1 Quests & Bonus Moments
     if SecretQuests.DoBonusMoments() then return true end
@@ -3546,9 +3773,6 @@ end
 -- ====================================================================
 -- 12. STATS CHECKER HUD & FLOATING TOGGLE (MATCHING TEDDY HUB LAYOUT)
 -- ====================================================================
-local HUDStatus = "Starting up..."
-local HUDSubStatus = "Black Leg: beli"
-local UI_Visible = true
 
 local function FormatNumber(n)
     local num = tonumber(n) or 0
@@ -3598,11 +3822,14 @@ local function CheckItemOwned(name)
     if InventoryCache[name] then return true end
     if name == "GodHuman" or name == "Godhuman" then
         if InventoryCache["Godhuman"] or InventoryCache["GodHuman"] then return true end
-        local r = nil
-        pcall(function()
-            r = ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyGodhuman", true)
-        end)
-        if r == 3 then return true end
+        if (MeleeProgression.Mastery["Godhuman"] or 0) > 0 then return true end
+        if Data.GetSea() == 3 then
+            local r = nil
+            pcall(function()
+                r = ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyGodhuman", true)
+            end)
+            if r == 1 or r == 2 or r == true then return true end
+        end
     elseif name == "Skull Guitar" or name == "Soul Guitar" then
         if InventoryCache["Soul Guitar"] or InventoryCache["Skull Guitar"] then return true end
     end
@@ -4261,6 +4488,11 @@ task.spawn(function()
                         return
                     end
                 end
+            end
+
+            -- Fighting Style Acquisition & Upgrade Preemption (Combat -> Dark Step -> Godhuman)
+            if StepMeleeBuy and StepMeleeBuy() then
+                return
             end
 
             -- Race Progression Engine (V2/V3 in Sea 2, V4 in Sea 3)
