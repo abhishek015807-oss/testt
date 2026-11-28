@@ -445,6 +445,7 @@ local CombatNet = {
     LastTargetHP = nil,
     LastDamageAt = 0,
     ActiveMode = nil,
+    ActiveModeIdx = 0,
     WorkingMode = nil,
     FailCycle = 0,
 }
@@ -484,6 +485,16 @@ local function EnsureCombatRemotes()
         local modules = ReplicatedStorage:FindFirstChild("Modules")
         local net = modules and modules:FindFirstChild("Net")
         if net then
+            if not CombatNet.NetBooted and typeof(require) == "function" then
+                CombatNet.NetBooted = true
+                pcall(function()
+                    local netMod = require(net)
+                    if type(netMod) == "table" and type(netMod.RemoteEvent) == "function" then
+                        RegisterAttackRemote = RegisterAttackRemote or netMod:RemoteEvent("RegisterAttack", true)
+                        RegisterHitRemote = RegisterHitRemote or netMod:RemoteEvent("RegisterHit", true)
+                    end
+                end)
+            end
             if not (RegisterAttackRemote and RegisterAttackRemote.Parent) then
                 RegisterAttackRemote = net:FindFirstChild("RE/RegisterAttack")
             end
@@ -1117,7 +1128,7 @@ local Combat = {
     FastAttack = true,
     BringMob = true,
     PreferredWeapon = "Melee",
-    HoverY = 15,
+    HoverY = 12,
     HoverSide = 0,
     AttackRange = 60,
 }
@@ -1375,7 +1386,7 @@ local function Attack()
         local primaryMob = hitTargets[1][1]
         local primaryPart = hitTargets[1][2]
 
-        -- Damage watchdog: lock onto working combat mode or auto-rotate every 1.3s on stall
+        -- Damage watchdog: rotate strictly across all 6 protocols every 0.65s until HP drops, then lock WorkingMode
         local targetHum = primaryMob and primaryMob:FindFirstChildOfClass("Humanoid")
         local curHP = targetHum and targetHum.Health
         local needsFallbackClick = false
@@ -1383,22 +1394,24 @@ local function Attack()
             if CombatNet.LastTarget ~= primaryMob then
                 CombatNet.LastTarget = primaryMob
                 CombatNet.LastTargetHP = curHP
-                CombatNet.LastDamageAt = tick()
+                if CombatNet.LastDamageAt == 0 or CombatNet.WorkingMode ~= nil then
+                    CombatNet.LastDamageAt = tick()
+                end
             elseif curHP < (CombatNet.LastTargetHP or curHP) then
                 CombatNet.LastTargetHP = curHP
                 CombatNet.LastDamageAt = tick()
                 if CombatNet.ActiveMode then
                     CombatNet.WorkingMode = CombatNet.ActiveMode
                 end
-            elseif (tick() - CombatNet.LastDamageAt) > 1.3 then
+            elseif (tick() - CombatNet.LastDamageAt) > 0.65 then
                 CombatNet.LastDamageAt = tick()
                 CombatNet.WorkingMode = nil
-                CombatNet.FailCycle = ((CombatNet.FailCycle or 0) + 1) % 5
+                CombatNet.FailCycle = ((CombatNet.ActiveModeIdx or CombatNet.FailCycle or 0) + 1) % 6
                 if CombatNet.ActiveMode == "EncRemote" then
                     CombatNet.SeedValue = nil
                 elseif CombatNet.ActiveMode == "SendHits" then
                     CombatNet.SendHitsFn = nil
-                    CombatNet.SkipSendHitsUntil = tick() + 30
+                    CombatNet.SkipSendHitsUntil = tick() + 20
                 end
                 needsFallbackClick = true
             end
@@ -1414,9 +1427,6 @@ local function Attack()
         end
 
         EnsureCombatRemotes()
-        if RegisterAttackRemote then
-            RegisterAttackRemote:FireServer(0)
-        end
 
         if not CombatNet.HitToken then
             local coSuffix = tostring(coroutine.running()):sub(11, 15)
@@ -1424,13 +1434,20 @@ local function Attack()
             CombatNet.HitToken = tostring(LocalPlayer.UserId):sub(2, 4) .. coSuffix
         end
 
+        local headPart = primaryMob:FindFirstChild("Head") or primaryPart
+        local restTargets = {}
+        for i = 2, #hitTargets do
+            restTargets[#restTargets + 1] = hitTargets[i]
+        end
+
         local sentAny = false
         local seedVal = RefreshCombatSeedAsync()
 
         local function tryMode(modeIdx)
             if modeIdx == 0 then
-                -- Encrypted Seeded Remote (2025/2026 Blox Fruits)
+                -- Encrypted Seeded Remote (tsuo_hub 2026)
                 if CombatNet.EncRemote and CombatNet.EncId and seedVal ~= nil and bit32 then
+                    if RegisterAttackRemote then RegisterAttackRemote:FireServer(0) end
                     local encTargets = {}
                     for _, pair in ipairs(hitTargets) do
                         local m = pair[1]
@@ -1445,7 +1462,6 @@ local function Attack()
                             table.insert(encTargets, pair)
                         end
                     end
-                    local headPart = primaryMob:FindFirstChild("Head") or primaryPart
                     local encOk = pcall(function()
                         local xorKey = math.floor(Workspace:GetServerTimeNow() / 10 % 10) + 1
                         local encName = string.gsub("RE/RegisterHit", ".", function(ch)
@@ -1456,57 +1472,79 @@ local function Attack()
                     end)
                     if encOk then
                         CombatNet.ActiveMode = "EncRemote"
+                        CombatNet.ActiveModeIdx = 0
                         return true
                     end
                 end
             elseif modeIdx == 1 then
-                -- Native SendHitsToServer
-                if tick() >= (CombatNet.SkipSendHitsUntil or 0) then
-                    local sendFn = ResolveSendHitsToServer()
-                    if sendFn then
-                        if CallAsGameThread(sendFn, primaryPart, hitTargets) then
-                            CombatNet.ActiveMode = "SendHits"
-                            return true
-                        else
-                            CombatNet.SendHitsFn = nil
-                            CombatNet.SkipSendHitsUntil = tick() + 30
-                        end
-                    end
-                end
-            elseif modeIdx == 2 then
-                -- Classic 2-arg RE/RegisterHit
+                -- Trimmed 2-arg RE/RegisterHit (Banana cat Hub / topi halloween)
                 if RegisterHitRemote then
+                    if RegisterAttackRemote then RegisterAttackRemote:FireServer(0) end
                     local ok = pcall(function()
-                        RegisterHitRemote:FireServer(primaryPart, hitTargets)
+                        RegisterHitRemote:FireServer(headPart, restTargets)
                     end)
                     if ok then
-                        CombatNet.ActiveMode = "RegHit2"
+                        CombatNet.ActiveMode = "RegHit2_Trim"
+                        CombatNet.ActiveModeIdx = 1
                         return true
                     end
                 end
-            elseif modeIdx == 3 then
-                -- Booted 1-arg token + 5-arg RE/RegisterHit
+            elseif modeIdx == 2 then
+                -- Booted 1-arg token + 5-arg RE/RegisterHit with 0.3 attack delay (QuanumOnyx / tsuo_hub)
                 if RegisterHitRemote then
+                    if RegisterAttackRemote then RegisterAttackRemote:FireServer(0.3) end
                     if not CombatNet.TokenBooted then
                         CombatNet.TokenBooted = true
                         pcall(function() RegisterHitRemote:FireServer(CombatNet.HitToken) end)
                     end
                     local ok = pcall(function()
-                        RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, nil, CombatNet.HitToken)
+                        RegisterHitRemote:FireServer(headPart, hitTargets, nil, nil, CombatNet.HitToken)
                     end)
                     if ok then
                         CombatNet.ActiveMode = "RegHit5"
+                        CombatNet.ActiveModeIdx = 2
                         return true
                     end
                 end
+            elseif modeIdx == 3 then
+                -- Native SendHitsToServer
+                if tick() >= (CombatNet.SkipSendHitsUntil or 0) then
+                    local sendFn = ResolveSendHitsToServer()
+                    if sendFn then
+                        if RegisterAttackRemote then RegisterAttackRemote:FireServer(0) end
+                        if CallAsGameThread(sendFn, headPart, restTargets) then
+                            CombatNet.ActiveMode = "SendHits"
+                            CombatNet.ActiveModeIdx = 3
+                            return true
+                        else
+                            CombatNet.SendHitsFn = nil
+                            CombatNet.SkipSendHitsUntil = tick() + 20
+                        end
+                    end
+                end
             elseif modeIdx == 4 then
+                -- Full 2-arg RE/RegisterHit (Fast-attack.lua)
+                if RegisterHitRemote then
+                    if RegisterAttackRemote then RegisterAttackRemote:FireServer(0) end
+                    local ok = pcall(function()
+                        RegisterHitRemote:FireServer(headPart, hitTargets)
+                    end)
+                    if ok then
+                        CombatNet.ActiveMode = "RegHit2_Full"
+                        CombatNet.ActiveModeIdx = 4
+                        return true
+                    end
+                end
+            elseif modeIdx == 5 then
                 -- 4-arg token RE/RegisterHit
                 if RegisterHitRemote then
+                    if RegisterAttackRemote then RegisterAttackRemote:FireServer(0) end
                     local ok = pcall(function()
-                        RegisterHitRemote:FireServer(primaryPart, hitTargets, nil, "078da341")
+                        RegisterHitRemote:FireServer(headPart, restTargets, nil, CombatNet.HitToken)
                     end)
                     if ok then
                         CombatNet.ActiveMode = "RegHit4"
+                        CombatNet.ActiveModeIdx = 5
                         return true
                     end
                 end
@@ -1516,14 +1554,15 @@ local function Attack()
 
         local modeOrder = {
             EncRemote = 0,
-            SendHits = 1,
-            RegHit2 = 2,
-            RegHit5 = 3,
-            RegHit4 = 4,
+            RegHit2_Trim = 1,
+            RegHit5 = 2,
+            SendHits = 3,
+            RegHit2_Full = 4,
+            RegHit4 = 5,
         }
         local startIdx = (CombatNet.WorkingMode and modeOrder[CombatNet.WorkingMode]) or (CombatNet.FailCycle or 0)
-        for offset = 0, 4 do
-            local idx = (startIdx + offset) % 5
+        for offset = 0, 5 do
+            local idx = (startIdx + offset) % 6
             if tryMode(idx) then
                 sentAny = true
                 break
@@ -4119,7 +4158,7 @@ task.spawn(function()
                     local mobHRP = targetMob:FindFirstChild("HumanoidRootPart")
                     local mobHum = targetMob:FindFirstChildOfClass("Humanoid")
                     if mobHRP and mobHum then
-                        -- Release & move on if a brought/glitched mob takes zero damage for 4.0s
+                        -- Release & move on if a brought/glitched mob takes zero damage for 8.0s
                         if hrp and (hrp.Position - mobHRP.Position).Magnitude <= 40 then
                             if FarmWatchdog.Mob ~= targetMob then
                                 FarmWatchdog.Mob = targetMob
@@ -4128,7 +4167,7 @@ task.spawn(function()
                             elseif mobHum.Health < (FarmWatchdog.HP or mobHum.Health) then
                                 FarmWatchdog.HP = mobHum.Health
                                 FarmWatchdog.Since = now
-                            elseif (now - FarmWatchdog.Since) >= 4.0 then
+                            elseif (now - FarmWatchdog.Since) >= 8.0 then
                                 ReleaseMob(targetMob)
                                 targetMob:SetAttribute("IgnoreBringUntil", now + 12)
                                 targetMob:SetAttribute("IgnoreTargetUntil", now + 4)
