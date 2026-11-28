@@ -1944,39 +1944,82 @@ local function GetActiveQuestState()
         end
     end
 
-    -- 2. Check Old Quest UI in Main & Main (minimal) (supports nested Quest frames on v30+)
+    -- 2. Check Old Quest UI in Main & Main (minimal) and any visible PlayerGui quest/Defeat label (v30+)
+    local function isEffectivelyVisible(obj)
+        local cur = obj
+        while cur and cur.Parent do
+            if cur:IsA("LayerCollector") then
+                return cur.Enabled
+            elseif cur:IsA("GuiObject") and not cur.Visible then
+                return false
+            elseif cur.Name == "PlayerGui" then
+                return true
+            end
+            cur = cur.Parent
+        end
+        return true
+    end
+
+    local ignoredGuis = {
+        BananaKaitunStatsHUD = true,
+        BananaKaitunStandalone = true,
+        Chat = true,
+        BubbleChat = true,
+        Freecam = true,
+    }
+
     for _, guiName in ipairs({ "Main", "Main (minimal)" }) do
         local gui = pgui:FindFirstChild(guiName)
         if gui then
-            local qFrame = gui:FindFirstChild("Quest") or gui:FindFirstChild("Quest", true)
-            if qFrame and qFrame:IsA("GuiObject") and qFrame.Visible then
-                local container = qFrame:FindFirstChild("Container")
-                if container then
-                    local questTitle = container:FindFirstChild("QuestTitle")
-                    local title = questTitle and questTitle:FindFirstChild("Title")
-                    if title and title.Text and title.Text ~= "" and title.Text:upper() ~= "QUEST" then
-                        return true, title.Text
+            for _, desc in ipairs(gui:GetDescendants()) do
+                if desc.Name == "Quest" and desc:IsA("GuiObject") and isEffectivelyVisible(desc) then
+                    local container = desc:FindFirstChild("Container")
+                    if container then
+                        local questTitle = container:FindFirstChild("QuestTitle")
+                        local title = questTitle and questTitle:FindFirstChild("Title")
+                        if title and title.Text and title.Text ~= "" and title.Text:upper() ~= "QUEST" then
+                            return true, tostring(title.Text):gsub("<[^>]+>", "")
+                        end
                     end
-                end
-                local fallbackTxt = CollectVisibleGuiText(qFrame):gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
-                if fallbackTxt ~= "" and fallbackTxt:upper() ~= "QUEST" then
-                    return true, fallbackTxt
-                end
-                local rawParts = {}
-                for _, obj in ipairs(qFrame:GetDescendants()) do
-                    if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text and obj.Text ~= "" and obj.Text:upper() ~= "QUEST" then
-                        table.insert(rawParts, obj.Text)
+                    local fallbackTxt = CollectVisibleGuiText(desc):gsub("<[^>]+>", ""):gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+                    if fallbackTxt ~= "" and fallbackTxt:upper() ~= "QUEST" then
+                        return true, fallbackTxt
                     end
+                    local rawParts = {}
+                    for _, obj in ipairs(desc:GetDescendants()) do
+                        if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text and obj.Text ~= "" then
+                            local clean = tostring(obj.Text):gsub("<[^>]+>", "")
+                            if clean:upper() ~= "QUEST" then
+                                table.insert(rawParts, clean)
+                            end
+                        end
+                    end
+                    return true, table.concat(rawParts, " ")
                 end
-                return true, table.concat(rawParts, " ")
             end
+        end
+    end
 
-            -- 3. Fallback: scan visible Defeat/Quest objective label directly (excludes Dialogue prompts)
-            local dlg = gui:FindFirstChild("Dialogue", true)
+    -- 3. Universal PlayerGui fallback: scan any enabled GUI for visible "Defeat ..." tracker text (excludes Dialogue)
+    for _, gui in ipairs(pgui:GetChildren()) do
+        if not ignoredGuis[gui.Name] and ((gui:IsA("LayerCollector") and gui.Enabled) or (gui:IsA("GuiObject") and gui.Visible)) then
             for _, obj in ipairs(gui:GetDescendants()) do
-                if obj:IsA("TextLabel") and obj.Visible and obj.Text and (not dlg or not obj:IsDescendantOf(dlg)) then
-                    if obj.Text:match("[Dd]efeat%s+%d+") or obj.Text:match("[Dd]efeat%s+.-%(%d+/%d+%)") then
-                        return true, obj.Text
+                if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text and obj.Text ~= "" and isEffectivelyVisible(obj) then
+                    local inDlg = false
+                    local anc = obj.Parent
+                    while anc and anc ~= gui do
+                        if anc.Name == "Dialogue" or anc.Name == "Dialog" then
+                            inDlg = true
+                            break
+                        end
+                        anc = anc.Parent
+                    end
+                    if not inDlg then
+                        local plain = tostring(obj.Text):gsub("<[^>]+>", ""):gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+                        local low = plain:lower()
+                        if low:find("defeat", 1, true) and (plain:match("%(%s*%d+%s*/%s*%d+%s*%)") or low:match("defeat%s+%d+")) then
+                            return true, plain
+                        end
                     end
                 end
             end
